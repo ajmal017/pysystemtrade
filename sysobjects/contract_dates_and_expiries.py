@@ -5,7 +5,7 @@ Represent contract dates and expiries
 import datetime
 
 from syscore.dateutils import contract_month_from_number, month_from_contract_letter
-from syscore.genutils import list_of_items_seperated_by_underscores
+from syscore.genutils import np_convert
 
 NO_EXPIRY_DATE_PASSED = ""
 NO_DAY_PASSED = object()
@@ -63,7 +63,7 @@ class singleContractDate(object):
 
     We store the expiry date separately
 
-    Representation is eithier 20171200 or 20171214 so always yyyymmdd
+    Representation is either 20171200 or 20171214 so always yyyymmdd
 
     Either:
 
@@ -99,7 +99,8 @@ class singleContractDate(object):
                 "contractDate(contract_date) needs to be defined as a str, yyyymm or yyyymmdd"
             )
 
-        self._set_expiry_date(expiry_date, approx_expiry_offset)
+        self._expiry_date = expiry_date
+        self._approx_expiry_offset = approx_expiry_offset
 
 
     def __repr__(self):
@@ -120,7 +121,7 @@ class singleContractDate(object):
         :return: None
         """
 
-        self._date_str = date_str + "00"
+        self._date_str = ''.join([date_str, "00"])
         self._only_has_month = True
 
 
@@ -139,20 +140,13 @@ class singleContractDate(object):
             self._only_has_month = False
 
 
-    # Hidden setter only used in init
-    def _set_expiry_date(self, expiry_date: expiryDate, approx_expiry_offset: int=0):
-
-        if expiry_date is NO_EXPIRY_DATE_PASSED:
-            expiry_date = self._get_expiry_date_from_approx_expiry(approx_expiry_offset)
-
-        self._expiry_date = expiry_date
 
     def _get_expiry_date_from_approx_expiry(self, approx_expiry_offset):
         # guess from the contract date - we can always correct this later
 
         approx_expiry_date = self.as_date()
         new_expiry_date = approx_expiry_date + datetime.timedelta(
-            days=approx_expiry_offset
+            days=np_convert(approx_expiry_offset)
         )
         expiry_date_tuple = (
             new_expiry_date.year,
@@ -166,7 +160,12 @@ class singleContractDate(object):
 
     @property
     def expiry_date(self):
-        return self._expiry_date
+        expiry_date =self._expiry_date
+        if expiry_date is NO_EXPIRY_DATE_PASSED:
+            approx_expiry_offset = self._approx_expiry_offset
+            expiry_date = self._get_expiry_date_from_approx_expiry(approx_expiry_offset)
+
+        return expiry_date
 
     @property
     def only_has_month(self):
@@ -175,6 +174,10 @@ class singleContractDate(object):
     # not using a setter as shouldn't be done casually
     def update_expiry_date(self, expiry_date: expiryDate):
         self._expiry_date = expiry_date
+
+    def update_expiry_date_with_new_offset(self, expiry_date_offset: int):
+        expiry_date = self._get_expiry_date_from_approx_expiry(expiry_date_offset)
+        self.update_expiry_date(expiry_date)
 
     def as_dict(self):
         ## safe, db independent way of storing expiry dates
@@ -256,6 +259,14 @@ class singleContractDate(object):
 
 CONTRACT_DATE_LIST_ENTRY_KEY = "contract_list"
 
+
+class listOfContractDateStr(list):
+    def sorted_date_str(self):
+        return listOfContractDateStr(sorted(self))
+
+    def final_date_str(self):
+        return self.sorted_date_str()[-1]
+
 class contractDate(object):
     """
 
@@ -272,7 +283,7 @@ class contractDate(object):
 
     We store the expiry date separately
 
-    Representation is eithier 20171200 or 20171214 so always yyyymmdd
+    Representation is either 20171200 or 20171214 so always yyyymmdd
 
     Either:
 
@@ -285,7 +296,8 @@ class contractDate(object):
             self,
             date_str,
             expiry_date=NO_EXPIRY_DATE_PASSED,
-            approx_expiry_offset=0):
+            approx_expiry_offset=0,
+            simple=False):
         """
         Vanilla
         contractDate("202003")
@@ -307,9 +319,12 @@ class contractDate(object):
         :param expiry_date:  expiryDate object, or list same length as contract date list
         :param approx_expiry_offset: int (applied to all expiry dates if a spread)
         """
-
-        contract_date_list = resolve_date_string_into_list_of_single_contract_dates(date_str, expiry_date=expiry_date, approx_expiry_offset=approx_expiry_offset)
+        if simple:
+            contract_date_list = [singleContractDate(date_str)]
+        else:
+            contract_date_list = resolve_date_string_into_list_of_single_contract_dates(date_str, expiry_date=expiry_date, approx_expiry_offset=approx_expiry_offset)
         self._list_of_single_contract_dates = contract_date_list
+
 
     def __repr__(self):
         return self.key
@@ -330,6 +345,23 @@ class contractDate(object):
     @property
     def list_of_single_contract_dates(self):
         return self._list_of_single_contract_dates
+
+    @property
+    def list_of_date_str(self):
+        list_of_contract_dates = self.list_of_single_contract_dates
+        list_of_date_str = [contract_date.date_str for contract_date in list_of_contract_dates]
+
+        return list_of_date_str
+
+    def index_of_sorted_contract_dates(self) -> list:
+
+        clist = self.list_of_date_str
+        return sorted(range(len(clist)), key=lambda k: clist[k])
+
+    def sort_with_idx(self, idx_list):
+        unsorted = self.list_of_single_contract_dates
+        sorted_dates = [unsorted[idx] for idx in idx_list]
+        self._list_of_single_contract_dates = sorted_dates
 
     @property
     def key(self):
@@ -380,6 +412,11 @@ class contractDate(object):
         assert not self.is_spread_contract
         self.update_nth_expiry_date(0, expiry_date)
 
+    def update_expiry_date_with_new_offset(self, approx_expiry_offset: int):
+        assert not self.is_spread_contract
+        single_contract_date = self.nth_contract_date(0)
+        single_contract_date.update_expiry_date_with_new_offset(approx_expiry_offset)
+
     def update_nth_expiry_date(self, contract_index: int, expiry_date: expiryDate):
         single_contract_date = self.nth_contract_date(contract_index)
         single_contract_date.update_expiry_date(expiry_date)
@@ -414,13 +451,14 @@ class contractDate(object):
     def letter_month(self):
         return self.first_contract_date.letter_month()
 
-class listOfContractDateStr(list):
-    def sorted_date_str(self):
-        return listOfContractDateStr(sorted(self))
+    def __len__(self):
+        return len(self.list_of_single_contract_dates)
 
-    def final_date_str(self):
-        return self.sorted_date_str()[-1]
+    def __getitem__(self, item):
+        return self.list_of_single_contract_dates[item]
 
+    def __setitem__(self, key:int, value: singleContractDate):
+        self.list_of_single_contract_dates[key] = value
 
 def resolve_date_string_into_list_of_single_contract_dates(date_str, expiry_date=NO_EXPIRY_DATE_PASSED, approx_expiry_offset=0) -> list:
     if type(date_str) is dict:
@@ -477,7 +515,7 @@ def resolve_date_string_into_list_of_date_str(date_str) -> list:
     if type(date_str) is list:
         return date_str
 
-    date_str_as_list = list_of_items_seperated_by_underscores(date_str)
+    date_str_as_list = date_str.split("_")
     return date_str_as_list
 
 def resolve_expiry_date_into_list_of_expiry_dates(expiry_date, date_str_as_list):
@@ -526,4 +564,4 @@ def contract_given_tuple(contract_date: contractDate, year_value:int, month_str:
     month_int = month_from_contract_letter(month_str)
     date_str = from_contract_numbers_to_contract_string(year_value, month_int, new_day_number)
 
-    return contractDate(date_str)
+    return contractDate(date_str, simple=True)

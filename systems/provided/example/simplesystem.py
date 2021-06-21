@@ -1,5 +1,5 @@
 from sysdata.sim.csv_futures_sim_data import csvFuturesSimData
-from sysdata.configdata import Config
+from sysdata.config.configdata import Config
 
 from systems.forecasting import Rules
 from systems.basesystem import System
@@ -7,7 +7,7 @@ from systems.forecast_combine import ForecastCombine
 from systems.forecast_scale_cap import ForecastScaleCap
 from systems.positionsizing import PositionSizing
 from systems.portfolio import Portfolios
-from systems.account import Account
+from systems.accounts.accounts_stage import Account
 
 
 def simplesystem(data=None, config=None, log_level="on"):

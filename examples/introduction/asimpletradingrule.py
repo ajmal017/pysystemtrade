@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use("TkAgg")
 """
 
 Work up a minimum example of a trend following system
@@ -27,7 +29,7 @@ print(data.get_raw_price("EDOLLAR").tail(5))
 data can also behave in a dict like manner (though it's not a dict)
 """
 
-print(data["SP500"])
+print(data["VIX"])
 print(data.keys())
 """
 
@@ -49,12 +51,12 @@ Let's create a simple trading rule
 No capping or scaling
 """
 
-from syscore.algos import robust_vol_calc
+from sysquant.estimators.vol import robust_vol_calc
 
 
 def calc_ewmac_forecast(price, Lfast, Lslow=None):
     """
-    Calculate the ewmac trading fule forecast, given a price and EWMA speeds
+    Calculate the ewmac trading rule forecast, given a price and EWMA speeds
     Lfast, Lslow and vol_lookback
 
     """
@@ -84,7 +86,7 @@ Try it out
 
 (this isn't properly scaled at this stage of course)
 """
-instrument_code = "GOLD"
+instrument_code = "VIX"
 price = data.daily_prices(instrument_code)
 ewmac = calc_ewmac_forecast(price, 32, 128)
 ewmac2 = calc_ewmac_forecast(price, 16, 64)
@@ -100,14 +102,14 @@ show()
 Did we make money?
 """
 
-from syscore.accounting import accountCurve
+from systems.accounts.account_forecast import pandl_for_instrument_forecast
 
-account = accountCurve(price, forecast=ewmac)
-account2 = accountCurve(price, forecast=ewmac2)
+account = pandl_for_instrument_forecast(forecast=ewmac, price = price)
+account2 = pandl_for_instrument_forecast(forecast=ewmac, price = price)
 
 account.curve()
 
 account.curve().plot()
 show()
 
-print(account.percent().stats())
+print(account.percent.stats())

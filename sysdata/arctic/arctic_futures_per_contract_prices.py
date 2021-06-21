@@ -3,11 +3,11 @@ Read and write data from mongodb for individual futures contracts
 
 """
 
-from sysdata.arctic.arctic_connection import articData
+from sysdata.arctic.arctic_connection import arcticData
 from sysdata.futures.futures_per_contract_prices import futuresContractPriceData, listOfFuturesContracts
 from sysobjects.futures_per_contract_prices import futuresContractPrices
 from sysobjects.contracts import futuresContract, get_code_and_id_from_contract_key
-from syslogdiag.log import logtoscreen
+from syslogdiag.log_to_screen import logtoscreen
 
 import pandas as pd
 
@@ -25,11 +25,10 @@ class arcticFuturesContractPriceData(futuresContractPriceData):
 
         super().__init__(log=log)
 
-        self._arctic_connection = articData(CONTRACT_COLLECTION, mongo_db=mongo_db)
+        self._arctic_connection = arcticData(CONTRACT_COLLECTION, mongo_db=mongo_db)
 
     def __repr__(self):
-        return "simData connection for individual futures contracts prices, arctic %s/%s @ %s " % (
-            self._arctic_connection.database_name, self._arctic_connection.collection_name, self._arctic_connection.host)
+        return repr(self._arctic_connection)
 
     @property
     def arctic_connection(self):
@@ -82,7 +81,7 @@ class arcticFuturesContractPriceData(futuresContractPriceData):
 
         list_of_contract_tuples = self._get_contract_tuples_with_price_data()
         list_of_contracts = [
-            futuresContract(contract_tuple[0], contract_tuple[1])
+            futuresContract.from_two_strings(contract_tuple[0], contract_tuple[1])
             for contract_tuple in list_of_contract_tuples
         ]
 

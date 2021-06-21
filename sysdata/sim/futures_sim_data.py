@@ -6,8 +6,11 @@ from sysdata.sim.sim_data import simData
 from sysobjects.adjusted_prices import futuresAdjustedPrices
 from sysobjects.instruments import assetClassesAndInstruments, instrumentCosts, futuresInstrumentWithMetaData
 from sysobjects.multiple_prices import futuresMultiplePrices
+from sysobjects.dict_of_named_futures_per_contract_prices import price_name, carry_name, forward_name, contract_name_from_column_name
 
-OVERIDE_ERROR = "You probably need to inherit from this method to do anything useful"
+price_contract_name = contract_name_from_column_name(price_name)
+carry_contract_name = contract_name_from_column_name(carry_name)
+forward_contract_name = contract_name_from_column_name(forward_name)
 
 class futuresSimData(simData):
 
@@ -48,15 +51,17 @@ class futuresSimData(simData):
         return asset_class
 
 
-    def get_raw_price(self, instrument_code) -> pd.Series:
+    def get_raw_price_from_start_date(self, instrument_code: str,
+                                      start_date) -> pd.Series:
         """
         For  futures the price is the backadjusted price
 
         :param instrument_code:
         :return: price
         """
+        price = self.get_backadjusted_futures_price(instrument_code)
 
-        return pd.Series(self.get_backadjusted_futures_price(instrument_code))
+        return price[start_date:]
 
 
     def get_instrument_raw_carry_data(self, instrument_code:str) -> pd.DataFrame:
@@ -75,9 +80,10 @@ class futuresSimData(simData):
         """
 
         all_price_data = self.get_multiple_prices(instrument_code)
+        carry_data = all_price_data[[price_name, carry_name,
+                               price_contract_name, carry_contract_name]]
 
-        return all_price_data[["PRICE", "CARRY",
-                               "PRICE_CONTRACT", "CARRY_CONTRACT"]]
+        return carry_data
 
     def get_current_and_forward_price_data(self, instrument_code: str) -> pd.DataFrame:
         """
@@ -97,7 +103,7 @@ class futuresSimData(simData):
         all_price_data = self.get_multiple_prices(instrument_code)
 
         return all_price_data[
-            ["PRICE", "FORWARD", "PRICE_CONTRACT", "FORWARD_CONTRACT"]
+            [price_name, forward_name,price_contract_name,forward_contract_name]
         ]
 
 
@@ -136,7 +142,7 @@ class futuresSimData(simData):
         return instrument_costs
 
 
-    def get_value_of_block_price_move(self, instrument_code):
+    def get_value_of_block_price_move(self, instrument_code: str) -> float:
         """
         How much is a $1 move worth in value terms?
 
@@ -153,7 +159,7 @@ class futuresSimData(simData):
 
         return block_move_value
 
-    def get_instrument_currency(self, instrument_code):
+    def get_instrument_currency(self, instrument_code: str) -> str:
         """
         What is the currency that this instrument is priced in?
 
@@ -176,7 +182,7 @@ class futuresSimData(simData):
         :return: A pd.Series, row names are instruments, content is asset class
         """
 
-        raise NotImplementedError(OVERIDE_ERROR)
+        raise NotImplementedError()
 
     def get_backadjusted_futures_price(self, instrument_code: str) -> futuresAdjustedPrices:
         """
@@ -185,12 +191,18 @@ class futuresSimData(simData):
         :return:
         """
 
-        raise NotImplementedError(OVERIDE_ERROR)
+        raise NotImplementedError()
 
 
     def get_multiple_prices(self, instrument_code: str) -> futuresMultiplePrices:
-        raise NotImplementedError(OVERIDE_ERROR)
+        start_date = self.start_date_for_data()
 
+        return self.get_multiple_prices_from_start_date(instrument_code,
+                                                        start_date=start_date)
+
+    def get_multiple_prices_from_start_date(self, instrument_code: str,
+                                            start_date) -> futuresMultiplePrices:
+        raise NotImplementedError()
 
 
     def _get_instrument_object_with_cost_data(self, instrument_code) -> futuresInstrumentWithMetaData:
@@ -200,7 +212,7 @@ class futuresSimData(simData):
         :returns: futuresInstrument
 
         """
-        raise NotImplementedError(OVERIDE_ERROR)
+        raise NotImplementedError()
 
 
     def _get_instrument_object_with_meta_data(self, instrument_code: str) -> futuresInstrumentWithMetaData:
@@ -211,7 +223,7 @@ class futuresSimData(simData):
         :return: futuresInstrument object
         """
 
-        raise NotImplementedError(OVERIDE_ERROR)
+        raise NotImplementedError()
 
 
 if __name__ == "__main__":

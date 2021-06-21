@@ -1,8 +1,10 @@
+import datetime
+
 from dataclasses import  dataclass
 
 from syscore.objects import arg_not_supplied, missing_contract
 
-from syslogdiag.log import logger
+from syslogdiag.logger import logger
 
 from sysobjects.contract_dates_and_expiries import contractDate, expiryDate
 from sysobjects.instruments import futuresInstrument
@@ -38,6 +40,11 @@ def contract_key_from_code_and_id(instrument_code, contract_id):
 def contract_from_code_and_id(instrument_code, contract_id):
     return futuresContract(instrument_code, contract_id)
 
+def contract_from_key(contract_key):
+    instrument_code, contract_id = get_code_and_id_from_contract_key(contract_key)
+
+    return contract_from_code_and_id(instrument_code, contract_id)
+
 class futuresContract(object):
     """
     Define an individual futures contract
@@ -46,8 +53,10 @@ class futuresContract(object):
 
     """
 
-    def __init__(self, instrument_object: futuresInstrument, contract_date_object: contractDate,
-                 parameter_object: parametersForFuturesContract = arg_not_supplied):
+    def __init__(self, instrument_object: futuresInstrument,
+                 contract_date_object: contractDate,
+                 parameter_object: parametersForFuturesContract = arg_not_supplied,
+                 simple: bool = False):
         """
         futuresContract(futuresInstrument, contractDate)
         OR
@@ -56,8 +65,8 @@ class futuresContract(object):
         :param instrument_object: str or futuresInstrument
         :param contract_date_object: contractDate or contractDateWithRollParameters or str
         """
-
-        instrument_object, contract_date_object = _resolve_args_for_futures_contract(instrument_object, contract_date_object)
+        if not simple:
+            instrument_object, contract_date_object = _resolve_args_for_futures_contract(instrument_object, contract_date_object)
 
         if parameter_object is arg_not_supplied:
             parameter_object = parametersForFuturesContract()
@@ -66,6 +75,16 @@ class futuresContract(object):
         self._contract_date = contract_date_object
         self._params = parameter_object
 
+    @classmethod
+    def from_two_strings(futuresContract, instrument_code: str,
+                         contract_date_str: str):
+
+        instrument_object = futuresInstrument(instrument_code)
+        contract_date = contractDate(contract_date_str, simple=True)
+
+        return futuresContract(instrument_object,
+                               contract_date,
+                               simple=True)
 
     def specific_log(self, log):
         new_log = log.setup(instrument_code = self.instrument_code, contract_date = self.date_str)
@@ -170,6 +189,13 @@ class futuresContract(object):
     def expiry_date(self):
         return self.contract_date.expiry_date
 
+    def expired(self):
+        expiry_date = self.expiry_date
+        if expiry_date<datetime.datetime.now():
+            return True
+        else:
+            return False
+
     def update_single_expiry_date(self, new_expiry_date: expiryDate):
         self.contract_date.update_single_expiry_date(new_expiry_date)
 
@@ -183,10 +209,10 @@ class futuresContract(object):
 
         return futuresContract(new_instrument_object, contract_date_object, parameter_object=params)
 
-    def update_expiry_dates_one_at_a_time_with_method(self, method):
+    def update_expiry_dates_one_at_a_time_with_method(self, method, **kwargs):
 
         as_list_of_individual_contracts = self.as_list_of_individual_contracts()
-        new_expiries = [method(single_contract) for single_contract in as_list_of_individual_contracts]
+        new_expiries = [method(single_contract, **kwargs) for single_contract in as_list_of_individual_contracts]
 
         for contract_index, expiry_date in enumerate(new_expiries):
             if expiry_date is missing_contract:
@@ -261,7 +287,13 @@ class listOfFuturesContracts(list):
 
         return unique_list_of_instruments
 
-    def contracts_with_price_data_for_instrument_code(self, instrument_code: str):
+    def contract_date_str_for_contracts_in_list_for_instrument_code(self, instrument_code: str) -> list:
+        list_of_contracts = self.contracts_in_list_for_instrument_code(instrument_code)
+        list_of_date_str = list_of_contracts.list_of_dates()
+        list_of_date_str = list(set(list_of_date_str))
+        return list_of_date_str
+
+    def contracts_in_list_for_instrument_code(self, instrument_code: str):
         list_of_contracts = [
             contract
             for contract in self

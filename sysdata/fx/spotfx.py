@@ -2,21 +2,20 @@
 Spot fx prices
 """
 
+import numpy as np
 import pandas as pd
 import datetime
 
 from sysdata.base_data import baseData
-from syscore.objects import data_error
+from syscore.merge_data import spike_in_data
 
 from sysobjects.spot_fx_prices import fxPrices, get_fx_tuple_from_code, DEFAULT_CURRENCY
-from sysdata.private_config import get_private_then_default_key_value
-
 
 DEFAULT_DATES = pd.date_range(
     start=datetime.datetime(1970, 1, 1), freq="B", end=datetime.datetime.now()
 )
 DEFAULT_RATE_SERIES = pd.Series(
-    [1.0] * len(DEFAULT_DATES),
+    np.full(len(DEFAULT_DATES), 1.0),
     index=DEFAULT_DATES)
 
 USE_CHILD_CLASS_ERROR = "You need to use a child class of fxPricesData"
@@ -194,8 +193,8 @@ class fxPricesData(baseData):
             new_fx_prices, check_for_spike=check_for_spike
         )
 
-        if merged_fx_prices is data_error:
-            return data_error
+        if merged_fx_prices is spike_in_data:
+            return spike_in_data
 
         rows_added = len(merged_fx_prices) - len(old_fx_prices)
 
@@ -218,9 +217,6 @@ class fxPricesData(baseData):
         new_log.msg("Added %d additional rows for %s" % (rows_added, code))
 
         return rows_added
-
-    def get_base_currency(self):
-        return get_private_then_default_key_value("base_currency")
 
 
     def get_list_of_fxcodes(self):

@@ -1,8 +1,8 @@
 
-from sysbrokers.IB.ib_client_id import ibBrokerClientIdData
+from sysbrokers.IB.client.ib_client_id import ibBrokerClientIdData
 from syscore.objects import arg_not_supplied
-from sysdata.mongodb.mongo_generic import mongoData
-from syslogdiag.log import logtoscreen
+from sysdata.mongodb.mongo_generic import mongoDataWithSingleKey
+from syslogdiag.log_to_screen import logtoscreen
 
 IB_CLIENT_COLLECTION = "IBClientTracker"
 IB_ID_REF = 'client_id'
@@ -20,7 +20,7 @@ class mongoIbBrokerClientIdData(ibBrokerClientIdData):
     ):
 
         super().__init__(log=log, idoffset=idoffset)
-        self._mongo_data = mongoData(IB_CLIENT_COLLECTION, IB_ID_REF, mongo_db)
+        self._mongo_data = mongoDataWithSingleKey(IB_CLIENT_COLLECTION, IB_ID_REF, mongo_db)
 
     @property
     def mongo_data(self):

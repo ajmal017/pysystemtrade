@@ -4,32 +4,34 @@ import datetime
 
 from collections import namedtuple
 
-from syscore.objects import header, table, body_text
-from syscore.dateutils import ROOT_BDAYS_INYEAR
-from sysproduction.diagnostic.backtest_state import from_marker_to_datetime
+from syscore.objects import header, table, body_text, missing_data
+from syscore.dateutils import ROOT_BDAYS_INYEAR, from_marker_to_datetime
 from sysproduction.data.positions import diagPositions
 
+from sysobjects.production.backtest_storage import interactiveBacktest
+from sysobjects.production.tradeable_object import instrumentStrategy
 
-def report_system_classic(data, data_backtest):
+def report_system_classic(data, backtest: interactiveBacktest):
     """
 
     :param strategy_name: str
     :param data: dataBlob
-    :param data_backtest: dataBacktest object populated with a specific backtest
+    :param backtest: dataBacktest object populated with a specific backtest
     :return: list of report format type objects
     """
 
-    strategy_name = data_backtest.strategy_name
+    strategy_name = backtest.strategy_name
+    timestamp = backtest.timestamp
 
     format_output = []
     report_header = header(
         "Strategy report for %s backtest timestamp %s produced at %s" %
-        (strategy_name, data_backtest.timestamp, str(
+        (strategy_name, timestamp, str(
             datetime.datetime.now())))
     format_output.append(report_header)
 
     unweighted_forecasts_df = get_forecast_matrix(
-        data_backtest,
+        backtest,
         stage_name="forecastScaleCap",
         method_name="get_capped_forecast")
     unweighted_forecasts_df_rounded = unweighted_forecasts_df.round(1)
@@ -40,7 +42,7 @@ def report_system_classic(data, data_backtest):
 
     # Forecast weights
     forecast_weights_df = get_forecast_matrix_over_code(
-        data_backtest, stage_name="combForecast", method_name="get_forecast_weights")
+        backtest, stage_name="combForecast", method_name="get_forecast_weights")
     forecast_weights_df_as_perc = forecast_weights_df * 100
     forecast_weights_df_as_perc_rounded = forecast_weights_df_as_perc.round(1)
     forecast_weights_table = table(
@@ -57,7 +59,7 @@ def report_system_classic(data, data_backtest):
     format_output.append(weighted_forecast_table)
 
     # Cash target
-    cash_target_dict = data_backtest.system.positionSize.get_daily_cash_vol_target()
+    cash_target_dict = backtest.system.positionSize.get_vol_target_dict()
     cash_target_text = body_text(
         "\nVol target calculation %s\n" %
         cash_target_dict)
@@ -66,7 +68,7 @@ def report_system_classic(data, data_backtest):
 
     # Vol calc
     vol_calc_df = get_stage_breakdown_over_codes(
-        data_backtest,
+        backtest,
         method_list=[
             daily_returns_vol,
             daily_denom_price,
@@ -80,7 +82,7 @@ def report_system_classic(data, data_backtest):
 
     # Subsystem position table
     subystem_positions_df = get_stage_breakdown_over_codes(
-        data_backtest,
+        backtest,
         method_list=[
             get_block_value,
             get_price_volatility,
@@ -102,7 +104,7 @@ def report_system_classic(data, data_backtest):
     # Portfolio position table: ss position, instr weight, IDM, position
     # required
     portfolio_positions_df = get_stage_breakdown_over_codes(
-        data_backtest,
+        backtest,
         method_list=[
             get_subsystem_position,
             get_instrument_weights,
@@ -127,7 +129,7 @@ def report_system_classic(data, data_backtest):
 
     # Position vs buffer table: position required, buffers, actual position
     versus_buffers_df = get_stage_breakdown_over_codes(
-        data_backtest,
+        backtest,
         method_list=[
             get_required_portfolio_position,
             get_lower_buffer,
@@ -137,9 +139,9 @@ def report_system_classic(data, data_backtest):
 
     instrument_code_list = versus_buffers_df.index
     timestamp_positions = get_position_at_timestamp_df_for_instrument_code_list(
-        data_backtest, data, instrument_code_list)
+        backtest, data, instrument_code_list)
     current_positions = get_current_position_df_for_instrument_code_list(
-        data_backtest, data, instrument_code_list
+        backtest, data, instrument_code_list
     )
     versus_buffers_and_positions_df = pd.concat(
         [versus_buffers_df, timestamp_positions, current_positions], axis=1
@@ -219,8 +221,7 @@ configForMethod = namedtuple(
         "global_bool",
         "requires_code_bool",
         "col_selector",
-        "scalar_dict_bool",
-        "scalar_dict_entry",
+        "scalar_bool"
     ],
 )
 
@@ -231,8 +232,7 @@ daily_returns_vol = configForMethod(
     False,
     True,
     None,
-    False,
-    False,
+    False
 )
 
 daily_denom_price = configForMethod(
@@ -242,7 +242,6 @@ daily_denom_price = configForMethod(
     False,
     True,
     None,
-    False,
     False)
 
 rawdata_daily_perc_vol = configForMethod(
@@ -252,8 +251,7 @@ rawdata_daily_perc_vol = configForMethod(
     False,
     True,
     None,
-    False,
-    False,
+    False
 )
 
 get_combined_forecast = configForMethod(
@@ -263,8 +261,7 @@ get_combined_forecast = configForMethod(
     False,
     True,
     None,
-    False,
-    None,
+    False
 )
 
 get_block_value = configForMethod(
@@ -274,8 +271,7 @@ get_block_value = configForMethod(
     False,
     True,
     None,
-    False,
-    None)
+    False)
 
 get_price_volatility = configForMethod(
     "positionSize",
@@ -284,12 +280,11 @@ get_price_volatility = configForMethod(
     False,
     True,
     None,
-    False,
-    None,
+    False
 )
 
 get_fx_rate = configForMethod(
-    "positionSize", "get_fx_rate", "FX", False, True, None, False, None
+    "positionSize", "get_fx_rate", "FX", False, True, None, False
 )
 
 get_instrument_ccy_vol = configForMethod(
@@ -299,8 +294,7 @@ get_instrument_ccy_vol = configForMethod(
     False,
     True,
     None,
-    False,
-    None)
+    False)
 
 get_instrument_value_vol = configForMethod(
     "positionSize",
@@ -309,8 +303,7 @@ get_instrument_value_vol = configForMethod(
     False,
     True,
     None,
-    False,
-    None)
+    False)
 
 get_daily_cash_vol_target = configForMethod(
     "positionSize",
@@ -319,8 +312,7 @@ get_daily_cash_vol_target = configForMethod(
     False,
     False,
     None,
-    True,
-    "daily_cash_vol_target",
+    True
 )
 
 get_vol_scalar = configForMethod(
@@ -330,8 +322,7 @@ get_vol_scalar = configForMethod(
     False,
     True,
     None,
-    False,
-    None,
+    False
 )
 
 get_subsystem_position = configForMethod(
@@ -341,8 +332,7 @@ get_subsystem_position = configForMethod(
     False,
     True,
     None,
-    False,
-    None,
+    False
 )
 
 get_instrument_weights = configForMethod(
@@ -352,8 +342,7 @@ get_instrument_weights = configForMethod(
     False,
     False,
     None,
-    False,
-    None,
+    False
 )
 
 get_idm = configForMethod(
@@ -363,8 +352,7 @@ get_idm = configForMethod(
     True,
     False,
     None,
-    False,
-    None,
+    False
 )
 
 get_required_portfolio_position = configForMethod(
@@ -374,8 +362,7 @@ get_required_portfolio_position = configForMethod(
     False,
     True,
     None,
-    False,
-    None,
+    False
 )
 
 get_lower_buffer = configForMethod(
@@ -385,8 +372,7 @@ get_lower_buffer = configForMethod(
     False,
     True,
     "bot_pos",
-    False,
-    None,
+    False
 )
 
 get_upper_buffer = configForMethod(
@@ -396,30 +382,29 @@ get_upper_buffer = configForMethod(
     False,
     True,
     "top_pos",
-    False,
-    None,
+    False
 )
 
 
-def get_stage_breakdown_over_codes(data_backtest, method_list=[]):
+def get_stage_breakdown_over_codes(backtest: interactiveBacktest, method_list: list):
 
     value_dict = {}
-    for method_config in method_list:
-        value_dict[method_config.name] = get_list_of_values_by_instrument_for_config(
-            data_backtest, method_config)
+    for config_for_method in method_list:
+        value_dict[config_for_method.name] = get_list_of_values_by_instrument_for_config(
+            backtest, config_for_method)
 
-    instrument_codes = data_backtest.system.get_instrument_list()
+    instrument_codes = backtest.system.get_instrument_list()
     value_df = pd.DataFrame(value_dict, index=instrument_codes)
 
     return value_df
 
 
 def get_list_of_values_by_instrument_for_config(
-        data_backtest, config_for_method):
-    instrument_codes = data_backtest.system.get_instrument_list()
-    datetime_cutoff = from_marker_to_datetime(data_backtest.timestamp)
+        backtest, config_for_method):
+    instrument_codes = backtest.system.get_instrument_list()
+    datetime_cutoff = from_marker_to_datetime(backtest.timestamp)
 
-    stage = getattr(data_backtest.system, config_for_method.stage_name)
+    stage = getattr(backtest.system, config_for_method.stage_name)
     method = getattr(stage, config_for_method.method_name)
 
     if config_for_method.global_bool:
@@ -448,8 +433,8 @@ def get_list_of_values_by_instrument_for_config(
 
         return value_list
 
-    if config_for_method.scalar_dict_bool:
-        value = method()[config_for_method.scalar_dict_entry]
+    if config_for_method.scalar_bool:
+        value = method()
         value_list = [value] * len(instrument_codes)
 
         return value_list
@@ -495,23 +480,32 @@ def get_position_at_timestamp_df_for_instrument_code_list(
 def get_position_for_instrument_code_at_timestamp(
         data_backtest, data, instrument_code):
     diag_positions = diagPositions(data)
-    positions_over_time = diag_positions.get_position_df_for_strategy_and_instrument(
-        data_backtest.strategy_name, instrument_code)
+
+    strategy_name = data_backtest.strategy_name
+    instrument_strategy = instrumentStrategy(strategy_name=strategy_name, instrument_code=instrument_code)
+
+    positions_over_time = diag_positions.get_position_df_for_instrument_strategy(instrument_strategy)
+    if positions_over_time is missing_data:
+        return np.nan
+
     datetime_cutoff = from_marker_to_datetime(data_backtest.timestamp)
+    positions_over_time_ffill =  positions_over_time.ffill()
+    positions_before_cutoff =   positions_over_time_ffill[:datetime_cutoff]
 
-    position_at_backtest_state = (
-        positions_over_time[:datetime_cutoff].ffill().values[-1]
-    )
+    if len(positions_before_cutoff)==0:
+        return np.nan
+    final_position = positions_before_cutoff.iloc[-1].position
 
-    return position_at_backtest_state
+    return final_position
 
 
 def get_current_position_for_instrument_code(
         data_backtest, data, instrument_code):
     diag_positions = diagPositions(data)
-    current_position = diag_positions.get_position_for_strategy_and_instrument(
-        data_backtest.strategy_name, instrument_code
-    )
+    strategy_name = data_backtest.strategy_name
+    instrument_strategy = instrumentStrategy(strategy_name=strategy_name, instrument_code=instrument_code)
+
+    current_position = diag_positions.get_current_position_for_instrument_strategy(instrument_strategy)
 
     return current_position
 

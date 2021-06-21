@@ -9,6 +9,12 @@ import numpy as np
 import datetime
 import functools
 
+def flatten_list(some_list):
+    flattened = [
+        item for sublist in some_list for item in sublist
+    ]
+
+    return flattened
 
 class not_required_flag(object):
     def __repr__(self):
@@ -71,11 +77,6 @@ def str2Bool(x):
     return x.lower() in ("t", "true")
 
 
-def TorF(x):
-    if x:
-        return "T"
-    else:
-        return "F"
 
 
 def str_of_int(x):
@@ -165,13 +166,6 @@ def value_or_npnan(x, return_value=None):
     # Either wrong type, or not a nan
     return x
 
-
-def get_safe_from_dict(some_dict, some_arg_name, some_default):
-    arg_from_dict = some_dict.get(some_arg_name, None)
-    if arg_from_dict is None:
-        return some_default
-    else:
-        return arg_from_dict
 
 
 def are_dicts_equal(d1, d2):
@@ -308,164 +302,6 @@ def get_unique_list(somelist):
 
 MISSING_STR = -1
 
-def list_of_items_seperated_by_underscores(this_str, result = ()):
-    find_underscore = this_str.find("_")
-    if find_underscore is MISSING_STR:
-        result_as_list = list(result)
-        result_as_list.append(this_str)
-        return result_as_list
-
-    partial_str = this_str[:find_underscore]
-    result = result + tuple([partial_str])
-
-    remaining_str = this_str[find_underscore+1:]
-
-    return list_of_items_seperated_by_underscores(remaining_str, result=result)
-
-def get_and_convert(
-        prompt,
-        type_expected=int,
-        allow_default=True,
-        default_value=0,
-        default_str=None):
-    invalid = True
-    input_str = prompt + " "
-    if allow_default:
-        if default_str is None:
-            input_str = input_str + \
-                "<RETURN for default %s> " % str(default_value)
-        else:
-            input_str = input_str + "<RETURN for %s> " % default_str
-
-    while invalid:
-        ans = input(input_str)
-
-        if ans == "" and allow_default:
-            return default_value
-        try:
-            result = type_expected(ans)
-            return result
-        except BaseException:
-            print(
-                "%s is not of expected type %s" %
-                (ans, type_expected.__name__))
-            continue
-
-
-
-TOP_LEVEL = -1
-
-
-class run_interactive_menu(object):
-    def __init__(
-        self,
-        top_level_menu_of_options,
-        nested_menu_of_options,
-        exit_option=-1,
-        another_menu=-2,
-    ):
-        """
-
-        :param top_level_menu_of_options: A dict of top level options
-        :param nested_menu_of_options: A dict of nested dicts, top levels keys are keys in top_level
-        :return: object
-        """
-
-        self._top_level = top_level_menu_of_options
-        self._nested = nested_menu_of_options
-        self._location = TOP_LEVEL
-        self._exit_option = exit_option
-        self._another_menu = another_menu
-
-    def propose_options_and_get_input(self):
-        is_top_level = self._location == TOP_LEVEL
-        if is_top_level:
-            top_level_menu = self._top_level
-            result = print_menu_and_get_response(
-                top_level_menu, default_option=-1, default_str="EXIT"
-            )
-            if result == -1:
-                return self._exit_option
-            else:
-                self._location = result
-                return self._another_menu
-        else:
-            sub_menu = self._nested[self._location]
-            result = print_menu_and_get_response(
-                sub_menu, default_option=-1, default_str="Back"
-            )
-            if result == -1:
-                self._location = -1
-                return self._another_menu
-            else:
-                return result
-
-
-def print_menu_of_values_and_get_response(
-        menu_of_options_as_list, default_str=""):
-    if default_str != "":
-        try:
-            menu_of_options_as_list.index(default_str)
-        except ValueError:
-            menu_of_options_as_list.append(default_str)
-
-        default_option = menu_of_options_as_list.index(default_str)
-    else:
-        default_option = None
-
-    menu_of_options = dict(
-        [
-            (int_key, menu_value)
-            for int_key, menu_value in enumerate(menu_of_options_as_list)
-        ]
-    )
-    ans = print_menu_and_get_response(
-        menu_of_options, default_option=default_option, default_str=default_str
-    )
-    option_chosen = menu_of_options_as_list[ans]
-
-    return option_chosen
-
-
-def print_menu_and_get_response(
-        menu_of_options,
-        default_option=None,
-        default_str=""):
-    """
-
-    :param menu_of_options: A dict, keys are ints, values are str
-    :param default_option: None, or one of the keys
-    :return: int menu chosen
-    """
-
-    menu_options_list = sorted(menu_of_options.keys())
-    for option in menu_options_list:
-        print("%d: %s" % (option, menu_of_options[option]))
-    print("\n")
-    computer_says_no = True
-    if default_option is None:
-        allow_default = False
-    else:
-        allow_default = True
-        menu_options_list = [default_option] + menu_options_list
-
-    while computer_says_no:
-        ans = get_and_convert(
-            "Your choice?",
-            default_value=default_option,
-            type_expected=int,
-            allow_default=allow_default,
-            default_str=default_str,
-        )
-        if ans not in menu_options_list:
-            print("Not a valid option")
-            continue
-        else:
-            computer_says_no = False
-            break
-
-    return ans
-
 
 def transfer_object_attributes(named_tuple_object, original_object):
     kwargs = dict(
@@ -479,22 +315,88 @@ def transfer_object_attributes(named_tuple_object, original_object):
     return new_object
 
 
-def highest_common_factor_for_list(list_of_ints):
+def highest_common_factor_for_list(list_of_ints: list) -> int:
+    """
+
+    :param list_of_ints:
+    :return: int
+
+    >>> highest_common_factor_for_list([2,3,4])
+    1
+    >>> highest_common_factor_for_list([2,6,4])
+    2
+    """
     return functools.reduce(gcd, list_of_ints)
 
 
-def divide_list_of_ints_by_highest_common_factor(list_of_ints):
+def divide_list_of_ints_by_highest_common_factor(list_of_ints: list) -> list:
+    """
+
+    :param list_of_ints:
+    :return: list
+
+    >>> divide_list_of_ints_by_highest_common_factor([1,2])
+    [1, 2]
+    >>> divide_list_of_ints_by_highest_common_factor([2,4])
+    [1, 2]
+    >>> divide_list_of_ints_by_highest_common_factor([1,2,3])
+    [1, 2, 3]
+    >>> divide_list_of_ints_by_highest_common_factor([1])
+    [1]
+    """
+
     gcd_value = highest_common_factor_for_list(list_of_ints)
     new_list = [int(float(x) / gcd_value) for x in list_of_ints]
     return new_list
 
 
-def list_of_ints_with_highest_common_factor_positive_first(list_of_ints):
+def list_of_ints_with_highest_common_factor_positive_first(list_of_ints: list) -> list:
+    """
+    Used to identify the unique version of a spread or fly contract
+
+    :param list_of_ints:
+    :return: list
+
+    >>> list_of_ints_with_highest_common_factor_positive_first([1])
+    [1]
+    >>> list_of_ints_with_highest_common_factor_positive_first([-1])
+    [1]
+    >>> list_of_ints_with_highest_common_factor_positive_first([1,-1])
+    [1, -1]
+    >>> list_of_ints_with_highest_common_factor_positive_first([-1,1])
+    [1, -1]
+    >>> list_of_ints_with_highest_common_factor_positive_first([-1,2])
+    [1, -2]
+    >>> list_of_ints_with_highest_common_factor_positive_first([-2,2])
+    [1, -1]
+    >>> list_of_ints_with_highest_common_factor_positive_first([2,-2])
+    [1, -1]
+    >>> list_of_ints_with_highest_common_factor_positive_first([2,-4,2])
+    [1, -2, 1]
+    >>> list_of_ints_with_highest_common_factor_positive_first([-2,4,-2])
+    [1, -2, 1]
+
+    """
     new_list = divide_list_of_ints_by_highest_common_factor(list_of_ints)
     multiply_sign = sign(new_list[0])
-    new_list = [x * multiply_sign for x in new_list]
+    new_list = [int(x * multiply_sign) for x in new_list]
     return new_list
 
+
+def np_convert(val):
+    """
+    Converts the passed numpy value to a native python type
+
+    >>> val = np.int64(1)
+    >>> type(val)
+    <class 'numpy.int64'>
+    >>> type(np_convert(val))
+    <class 'int'>
+
+    :param val:
+    :return: val as native type
+    """
+    return val.item() if isinstance(val, np.generic) else val
 
 if __name__ == "__main__":
     import doctest

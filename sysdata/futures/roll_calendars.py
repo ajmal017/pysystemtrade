@@ -1,6 +1,6 @@
 from sysdata.base_data import baseData
 from sysobjects.roll_calendars import rollCalendar
-from syslogdiag.log import logtoscreen
+from syslogdiag.log_to_screen import logtoscreen
 
 USE_CHILD_CLASS_ROLL_CALENDAR_ERROR = (
     "You need to use a child class of rollCalendarData"
@@ -32,7 +32,7 @@ class rollCalendarData(baseData):
         if self.is_code_in_data(instrument_code):
             return self._get_roll_calendar_without_checking(instrument_code)
         else:
-            return rollCalendar.create_empty()
+            raise Exception("Calendar for %s not found!" % instrument_code)
 
     def delete_roll_calendar(self, instrument_code:str, are_you_sure=False):
         self.log.label(instrument_code=instrument_code)
@@ -65,13 +65,13 @@ class rollCalendarData(baseData):
             if ignore_duplication:
                 pass
             else:
-                raise self.log.warn(
+                raise Exception(
                     "There is already %s in the data, you have to delete it first" %
                     instrument_code)
 
         self._add_roll_calendar_without_checking_for_existing_entry(instrument_code, roll_calendar)
 
-        self.log.terse(
+        self.log.msg(
             "Added roll calendar for instrument %s" %
             instrument_code)
 

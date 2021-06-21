@@ -5,17 +5,33 @@ Basic building blocks of trading rules, like volatility measurement and
 crossovers
 
 """
-from copy import copy
 import warnings
 
 import numpy as np
 import pandas as pd
 
-from syscore.genutils import str2Bool, sign
-from systems.defaults import get_default_config_key_value
-from syscore.objects import missing_data
+from syscore.genutils import sign
 
 LARGE_NUMBER_OF_DAYS = 250 * 100 * 100
+
+def calculate_weighted_average_with_nans(weights: list, data: list):
+    def _zero_weight(weight, data_item):
+        if np.isnan(weight) or np.isnan(data_item):
+            return 0.0
+        return weight
+
+    safe_weights = [_zero_weight(weight, data_item) for weight, data_item
+                    in zip(weights, data)]
+
+    sum_safe_weights = sum(safe_weights)
+    if sum_safe_weights==0:
+        return 0.0
+    renormalise = 1.0 /sum_safe_weights
+    weighted_value = [renormalise * weight * data_item for
+                      weight, data_item in zip(safe_weights, data)]
+
+    # could still be nan in data
+    return np.nansum(weighted_value)
 
 
 def apply_with_min_periods(xcol, my_func=np.nanmean, min_periods=0):
@@ -38,203 +54,6 @@ def apply_with_min_periods(xcol, my_func=np.nanmean, min_periods=0):
         return my_func(xcol)
     else:
         return np.nan
-
-
-def vol_estimator(x, using_exponent=True, min_periods=20, ew_lookback=250):
-    """
-    Generic vol estimator used for optimisation, works on data frames, produces
-    a single answer
-
-    :param x: data
-    :type x: Tx1 pd.DataFrame
-
-    :param using_exponent: Use exponential or normal vol (latter recommended
-    for bootstrapping)
-    :type using_exponent: bool
-
-    :param min_periods: The minimum number of observations (*default* 10)
-    :type min_periods: int
-
-    :returns: pd.DataFrame -- volatility measure
-
-    """
-    if using_exponent:
-        vol = (x.ewm(span=ew_lookback,
-                     min_periods=min_periods).std().iloc[-1, :].values[0])
-
-    else:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=RuntimeWarning)
-            vol = x.apply(
-                apply_with_min_periods,
-                axis=0,
-                min_periods=min_periods,
-                my_func=np.nanstd,
-            )
-
-    stdev_list = list(vol)
-
-    return stdev_list
-
-
-def mean_estimator(x, using_exponent=True, min_periods=20, ew_lookback=500):
-    """
-    Generic mean estimator used for optimisation, works on data frames
-
-    :param using_exponent: Use exponential or normal vol (latter recommended
-    for bootstrapping)
-    :type using_exponent: bool
-
-    """
-    if using_exponent:
-        means = (
-            x.ewm(x, span=ew_lookback, min_periods=min_periods)
-            .mean()
-            .iloc[-1, :]
-            .values[0]
-        )
-
-    else:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=RuntimeWarning)
-
-            means = x.apply(
-                apply_with_min_periods,
-                axis=0,
-                min_periods=min_periods,
-                my_func=np.nanmean,
-            )
-
-    mean_list = list(means)
-    return mean_list
-
-
-def robust_vol_calc(
-    x,
-    days=35,
-    min_periods=10,
-    vol_abs_min=0.0000000001,
-    vol_floor=True,
-    floor_min_quant=0.05,
-    floor_min_periods=100,
-    floor_days=500,
-    backfill=False,
-):
-    """
-    Robust exponential volatility calculation, assuming daily series of prices
-    We apply an absolute minimum level of vol (absmin);
-    and a volfloor based on lowest vol over recent history
-
-    :param x: data
-    :type x: Tx1 pd.Series
-
-    :param days: Number of days in lookback (*default* 35)
-    :type days: int
-
-    :param min_periods: The minimum number of observations (*default* 10)
-    :type min_periods: int
-
-    :param vol_abs_min: The size of absolute minimum (*default* =0.0000000001)
-      0.0= not used
-    :type absmin: float or None
-
-    :param vol_floor Apply a floor to volatility (*default* True)
-    :type vol_floor: bool
-
-    :param floor_min_quant: The quantile to use for volatility floor (eg 0.05
-      means we use 5% vol) (*default 0.05)
-    :type floor_min_quant: float
-
-    :param floor_days: The lookback for calculating volatility floor, in days
-      (*default* 500)
-    :type floor_days: int
-
-    :param floor_min_periods: Minimum observations for floor - until reached
-      floor is zero (*default* 100)
-    :type floor_min_periods: int
-
-    :returns: pd.DataFrame -- volatility measure
-    """
-
-    # Standard deviation will be nan for first 10 non nan values
-    vol = x.ewm(adjust=True, span=days, min_periods=min_periods).std()
-    vol[vol < vol_abs_min] = vol_abs_min
-
-    if vol_floor:
-        # Find the rolling 5% quantile point to set as a minimum
-        vol_min = vol.rolling(
-            min_periods=floor_min_periods, window=floor_days
-        ).quantile(quantile=floor_min_quant)
-
-        # set this to zero for the first value then propagate forward, ensures
-        # we always have a value
-        vol_min.at[vol_min.index[0]] = 0.0
-        vol_min = vol_min.ffill()
-
-        # apply the vol floor
-        vol_with_min = pd.concat([vol, vol_min], axis=1)
-        vol_floored = vol_with_min.max(axis=1, skipna=False)
-    else:
-        vol_floored = vol
-
-    if backfill:
-        # have to fill forwards first, as it's only the start we want to
-        # backfill, eg before any value available
-        vol_forward_fill = vol_floored.fillna(method="ffill")
-        vol_backfilled = vol_forward_fill.fillna(method="bfill")
-    else:
-        vol_backfilled = vol_floored
-
-    return vol_backfilled
-
-
-def forecast_scalar(
-        cs_forecasts,
-        window=250000,
-        min_periods=500,
-        backfill=True):
-    """
-    Work out the scaling factor for xcross such that T*x has an abs value of 10 (or whatever the average absolute forecast is)
-
-    :param cs_forecasts: forecasts, cross sectionally
-    :type cs_forecasts: pd.DataFrame TxN
-
-    :param span:
-    :type span: int
-
-    :param min_periods:
-
-
-    :returns: pd.DataFrame
-    """
-    backfill = str2Bool(backfill)  # in yaml will come in as text
-    # We don't allow this to be changed in config
-    target_abs_forecast = get_default_config_key_value(
-        "average_absolute_forecast")
-    if target_abs_forecast is missing_data:
-        raise Exception(
-            "average_absolute_forecast not defined in system defaults file")
-
-    # Remove zeros/nans
-    copy_cs_forecasts = copy(cs_forecasts)
-    copy_cs_forecasts[copy_cs_forecasts == 0.0] = np.nan
-
-    # Take CS average first
-    # we do this before we get the final TS average otherwise get jumps in
-    # scalar when new markets introduced
-    if copy_cs_forecasts.shape[1] == 1:
-        x = copy_cs_forecasts.abs().iloc[:, 0]
-    else:
-        x = copy_cs_forecasts.ffill().abs().median(axis=1)
-
-    # now the TS
-    avg_abs_value = x.rolling(window=window, min_periods=min_periods).mean()
-    scaling_factor = target_abs_forecast / avg_abs_value
-
-    if backfill:
-        scaling_factor = scaling_factor.fillna(method="bfill")
-
-    return scaling_factor
 
 
 def apply_buffer_single_period(
@@ -282,8 +101,11 @@ def apply_buffer_single_period(
 
 
 def apply_buffer(
-    optimal_position, pos_buffers, trade_to_edge=False, roundpositions=False
-):
+    optimal_position: pd.Series,
+        pos_buffers: pd.DataFrame,
+        trade_to_edge: bool=False,
+        roundpositions: bool=False
+) -> pd.Series:
     """
     Apply a buffer to a position
 
@@ -330,7 +152,7 @@ def apply_buffer(
             float(use_optimal_position.values[idx]),
             float(top_pos.values[idx]),
             float(bot_pos.values[idx]),
-            trade_to_edge,
+            trade_to_edge=trade_to_edge,
         )
         buffered_position_list.append(current_position)
 
@@ -439,6 +261,7 @@ def map_forecast_value(
             capped_value,
             a_param,
             b_param))
+
 
 
 if __name__ == "__main__":

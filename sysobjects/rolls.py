@@ -1,5 +1,4 @@
-from bisect import bisect_left, bisect_right
-
+from syscore.genutils import np_convert
 import datetime
 from copy import copy
 
@@ -408,17 +407,19 @@ class contractDateWithRollParameters(object):
     @property
     def desired_roll_date(self) ->datetime.datetime:
         return self.contract_date.expiry_date + datetime.timedelta(
-            days=self.roll_parameters.roll_offset_day
+            days=np_convert(self.roll_parameters.roll_offset_day)
         )
 
-    def get_unexpired_contracts_from_now_to_contract_date(self):
+    def get_contracts_from_recently_to_contract_date(self):
         """
         Returns all the unexpired contracts between now and the contract date
+
+        We go back 3 months in case of a mismatch between roll parameters and actual expiries when setting up data
 
         :return: list of contractDate
         """
 
-        datetime_now = datetime.datetime.now()
+        datetime_now = datetime.datetime.now() - datetime.timedelta(100)
         contract_dates = []
         current_contract_date_with_roll_parameters = copy(self)
 

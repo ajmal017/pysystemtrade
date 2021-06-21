@@ -1,51 +1,51 @@
 from pymongo import MongoClient, ASCENDING
 from copy import copy
 import numpy as np
+import re
 
-from syscore.genutils import get_safe_from_dict
 from syscore.objects import arg_not_supplied
-from sysdata.private_config import get_list_of_private_then_default_key_values
+from sysdata.config.production_config import get_production_config
 
-LIST_OF_MONGO_PARAMS = ["db", "host"]
-
-# DO NOT CHANGE THIS VALUE!!!! IT WILL SCREW UP ARCTIC
-DEFAULT_MONGO_PORT = 27017
+LIST_OF_MONGO_PARAMS = ["mongo_db", "mongo_host", "mongo_port"]
 
 
 MONGO_INDEX_ID = "_id_"
 MONGO_ID_KEY = "_id"
 
+# regular expression pattern for mongodb connection URLs
+host_pattern = re.compile('^(mongodb://)([^:]+):([^@]+)@([^/]+)')
+
 def mongo_defaults(**kwargs):
     """
     Returns mongo configuration with following precedence
 
-    1- if passed in arguments: db, host - use that
-    2- if defined in private_config file, use that. mongo_db, mongo_host
+    1- if passed in arguments: mongo_db, mongo_host, mongo_port - use that
+    2- if defined in private_config file, use that. mongo_db, mongo_host, mongo_port
     3- if defined in system defaults file, use that: mongo_db, mongo_host
 
     :return: mongo db, hostname, port
     """
-    param_names_with_prefix = [
-        "mongo_" + arg_name for arg_name in LIST_OF_MONGO_PARAMS]
-    config_dict = get_list_of_private_then_default_key_values(
-        param_names_with_prefix)
+    # this will include defaults.yaml if not defined in private
+    passed_param_names = list(kwargs.keys())
+    production_config =get_production_config()
+    output_dict = {}
+    for param_name in LIST_OF_MONGO_PARAMS:
 
-    yaml_dict = {}
-    for arg_name in LIST_OF_MONGO_PARAMS:
-        yaml_arg_name = "mongo_" + arg_name
+        if param_name in passed_param_names:
+            param_value = kwargs[param_name]
+        else:
+            param_value = arg_not_supplied
 
-        # Start with config (precedence: private config, then system config)
-        arg_value = config_dict[yaml_arg_name]
-        # Overwrite with kwargs
-        arg_value = get_safe_from_dict(kwargs, arg_name, arg_value)
+        if param_value is arg_not_supplied:
 
-        # Write
-        yaml_dict[arg_name] = arg_value
+            param_value = getattr(production_config, param_name)
+
+        output_dict[param_name] = param_value
 
     # Get from dictionary
-    mongo_db = yaml_dict["db"]
-    hostname = yaml_dict["host"]
-    port = DEFAULT_MONGO_PORT
+    mongo_db = output_dict["mongo_db"]
+    hostname = output_dict["mongo_host"]
+    port = output_dict["mongo_port"]
 
     return mongo_db, hostname, port
 
@@ -82,9 +82,13 @@ class mongoDb():
     But requires adding a collection with mongoConnection before useful
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, mongo_database_name: str = arg_not_supplied,
+                 mongo_host: str = arg_not_supplied,
+                 mongo_port: int  = arg_not_supplied):
 
-        database_name, host, port = mongo_defaults(**kwargs)
+        database_name, host, port = mongo_defaults(mongo_database_name = mongo_database_name,
+                                                   mongo_host = mongo_host,
+                                                   mongo_port = mongo_port)
 
         self.database_name = database_name
         self.host = host
@@ -97,16 +101,16 @@ class mongoDb():
         self.db = db
 
     def __repr__(self):
-        return "Mongodb database: host %s, port %d, db name %s" % (
-            self.host,
-            self.port,
+        clean_host = clean_mongo_host(self.host)
+        return "Mongodb database: host %s, db name %s" % (
+            clean_host,
             self.database_name,
         )
 
 
 class mongoConnection(object):
     """
-    All of our mongo connections use this class (for static data, not time series which goes via artic)
+    All of our mongo connections use this class (for static data, not time series which goes via arctic)
 
     """
 
@@ -134,8 +138,9 @@ class mongoConnection(object):
         self.collection = collection
 
     def __repr__(self):
-        return "Mongodb connection: host %s, port %d, db name %s, collection %s" % (
-            self.host, self.port, self.database_name, self.collection_name, )
+        clean_host = clean_mongo_host(self.host)
+        return "Mongodb connection: host %s, db name %s, collection %s" % (
+            clean_host, self.database_name, self.collection_name, )
 
     def get_indexes(self):
 
@@ -195,3 +200,18 @@ def mongo_clean_ints(dict_to_clean):
         new_dict[key_name] = key_value
 
     return new_dict
+
+
+def clean_mongo_host(host_string):
+    """
+    If the host string is a mongodb connection URL with authentication values, then return just the host and port part
+    :param host_string
+    :return: host and port only
+    """
+
+    clean_host = host_string
+    match = host_pattern.match(host_string)
+    if match is not None:
+        clean_host = match.group(4)
+
+    return clean_host

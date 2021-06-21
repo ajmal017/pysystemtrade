@@ -1,6 +1,6 @@
 
 
-Here is a whistlestop tour of what pysystemtrade can currently do. You'll probably want to read the [users guide](userguide.md) after this.
+Here is a whistlestop tour of what pysystemtrade can currently do. You'll probably want to read the [users guide](backtesting.md) after this.
 Notice that you will see different results than shown here, as you will be using more up to date data.
 
 ## A simple trading rule
@@ -52,7 +52,7 @@ Name: price, dtype: float64
 
 ```python
 data.keys() ## equivalent to data.get_instrument_list
-data['SP500'] ## equivalent to data.get_instrument_price
+data['SP500_micro'] ## equivalent to data.get_instrument_price
 ```
 
 Price data is useful, but is there any other data available? For futures, yes, we can get the data we need to implement a carry rule:
@@ -74,17 +74,15 @@ data.get_instrument_raw_carry_data("EDOLLAR").tail(6)
 
 Let's create a simple trading rule.
 
-
 ```python
 
 import pandas as pd
-from syscore.algos import robust_vol_calc
+from sysquant.estimators.vol import robust_vol_calc
+
 
 def calc_ewmac_forecast(price, Lfast, Lslow=None):
-
-
     """
-    Calculate the ewmac trading fule forecast, given a price and EWMA speeds Lfast, Lslow and vol_lookback
+    Calculate the ewmac trading rule forecast, given a price and EWMA speeds Lfast, Lslow and vol_lookback
 
     """
     ## price: This is the stitched price series
@@ -93,15 +91,15 @@ def calc_ewmac_forecast(price, Lfast, Lslow=None):
 
     price = price.resample("1B").last()
     if Lslow is None:
-        Lslow=4*Lfast
+        Lslow = 4 * Lfast
 
     ## We don't need to calculate the decay parameter, just use the span directly
 
-    fast_ewma=price.ewm(span=Lfast).mean()
-    slow_ewma=price.ewm(span=Lslow).mean()
-    raw_ewmac=fast_ewma - slow_ewma
+    fast_ewma = price.ewm(span=Lfast).mean()
+    slow_ewma = price.ewm(span=Lslow).mean()
+    raw_ewmac = fast_ewma - slow_ewma
 
-    vol=robust_vol_calc(price.diff())    
+    vol = robust_vol_calc(price.diff())
 
     return raw_ewmac / vol
 
@@ -112,7 +110,6 @@ Let's run it and look at the output
 instrument_code='EDOLLAR'
 price=data.daily_prices(instrument_code)
 ewmac=calc_ewmac_forecast(price, 32, 128)
-ewmac.columns=['forecast']
 ewmac.tail(5)
 
 from matplotlib.pyplot import show
@@ -132,9 +129,9 @@ Freq: B, dtype: float64
 Did we make any money?
 
 ```python
-from syscore.accounting import accountCurve
-account = accountCurve(price, forecast=ewmac)
-account.percent().stats()
+from systems.accounts.account_forecast import pandl_for_instrument_forecast
+account = pandl_for_instrument_forecast(forecast = ewmac, price=price)
+account.percent.stats()
 ```
 
 ```
@@ -168,8 +165,8 @@ Looks like we did make a few bucks. `account`, by the way inherits from a pandas
 ```python
 account.sharpe() ## get the Sharpe Ratio (annualised), and any other statistic which is in the stats list
 account.curve().plot() ## plot the cumulative account curve (equivalent to account.cumsum().plot() inicidentally)
-account.percent() ## gives a % curve
-account.percent().drawdown().plot() ## see the drawdowns as a percentage
+account.percent ## gives a % curve
+account.percent.drawdown().plot() ## see the drawdowns as a percentage
 account.weekly ## weekly returns (also daily [default], monthly, annual)
 account.gross.ann_mean() ## annual mean for gross returns, also costs (there are none in this simple example)
 ```
@@ -259,9 +256,11 @@ We'll see this pattern of `my_system...stage name...get_something()` a lot. The 
 What about if we want more than one trading rule, say a couple of variations of the ewmac rule? To define two different flavours of ewmac we're going to need to learn a little bit more about trading rules. Remember when we had `my_rules=Rules(dict(ewmac=ewmac))`? Well this is an equivalent way of doing it:
 
 ```python
-from systems.forecasting import TradingRule
-ewmac_rule=TradingRule(ewmac)
-my_rules=Rules(dict(ewmac=ewmac_rule))
+
+from systems.trading_rules import TradingRule
+
+ewmac_rule = TradingRule(ewmac)
+my_rules = Rules(dict(ewmac=ewmac_rule))
 ewmac_rule
 ```
 
@@ -347,7 +346,7 @@ from systems.forecast_scale_cap import ForecastScaleCap
 
 ## By default we pool esimates across instruments. It's worth telling the system what instruments we want to use:
 #
-my_config.instruments=["EDOLLAR", "US10", "EDOLLAR", "CORN", "SP500"]
+my_config.instruments=["EDOLLAR", "US10", "EDOLLAR", "CORN", "SP500_micro"]
 
 ## this parameter ensures we estimate:
 my_config.use_forecast_scale_estimates=True
@@ -367,7 +366,7 @@ Freq: B, dtype: float64
 ```
 
 
-Alternatively we can use the fixed values from Appendix B of my book ["Systematic Trading"](http:/www.systematictrading.org).
+Alternatively we can use the fixed values from Appendix B of my book ["Systematic Trading"](https://www.systematicmoney.org/systematic-trading).
 
 
 ```python
@@ -396,14 +395,15 @@ my_system.forecastScaleCap.get_capped_forecast("EDOLLAR", "ewmac32")
 Freq: B, dtype: float64
 ```
 
-*We didn't have to pass the forecast cap of 20.0, since the system was happy to use the default value (this is defined in the system defaults file, which the full [users guide](userguide.md) will tell you more about).*
+*We didn't have to pass the forecast cap of 20.0, since the system was happy to use the default value (this is defined in the system defaults file, which the full [users guide](backtesting.md) will tell you more about).*
 
 Since we have two trading rule variations we're naturally going to want to combine them (chapter 8 of my book). For a very quick and dirty exercise running this code will use equal forecast weights across instruments, and use no diversification multiplier:
 
 ```python
 from systems.forecast_combine import ForecastCombine
-combiner=ForecastCombine()
-my_system=System([fcs, empty_rules, combiner], data, my_config)
+
+combiner = ForecastCombine()
+my_system = System([fcs, empty_rules, combiner], data, my_config)
 my_system.combForecast.get_forecast_weights("EDOLLAR").tail(5)
 my_system.combForecast.get_forecast_diversification_multiplier("EDOLLAR").tail(5)
 
@@ -430,19 +430,22 @@ Freq: B, dtype: float64
 
 Alternatively you can estimate div. multipliers, and weights.
 
-Note: Since we need to know the performance of different trading rules, we need to include an Accounts stage to calculate these:
+Note: Since we need to know the performance of different trading rules, we need to include an Accounts stage to calculate these which in turn uses position sizing and raw data:
 
 ```python
-from systems.account import Account
+from systems.accounts.accounts_stage import Account
+combiner = ForecastCombine()
+raw_data = RawData()
+position_size = PositionSizing()
 my_account = Account()
 
 ## let's use naive markowitz to get more interesting results...
-my_config.forecast_weight_estimate=dict(method="one_period")
-my_config.use_forecast_weight_estimates=True
+my_config.forecast_weight_estimate = dict(method="one_period")
+my_config.use_forecast_weight_estimates = True
 my_config.use_forecast_div_mult_estimates = True
 
 combiner = ForecastCombine()
-my_system = System([my_account, fcs, my_rules, combiner], data, my_config)
+my_system = System([my_account, fcs, my_rules, combiner, position_size, raw_data], data, my_config)
 
 ## this is a bit slow, better to know what's going on
 my_system.set_logging_level("on")
@@ -479,7 +482,7 @@ my_config.forecast_weights=dict(ewmac8=0.5, ewmac32=0.5)
 my_config.forecast_div_multiplier=1.1
 my_config.use_forecast_weight_estimates = False
 my_config.use_forecast_div_mult_estimates = False
-my_system=System([fcs, empty_rules, combiner], data, my_config)
+my_system=System([fcs, empty_rules, combiner, raw_data, position_size], data, my_config)
 my_system.combForecast.get_combined_forecast("EDOLLAR").tail(5)
 ```
 
@@ -498,14 +501,12 @@ If you're working through my book you'd know the next stage is deciding what lev
 Let's do the position scaling:
 
 ```python
-from systems.positionsizing import PositionSizing
-possizer=PositionSizing()
 
 my_config.percentage_vol_target=25
 my_config.notional_trading_capital=500000
 my_config.base_currency="GBP"
 
-my_system=System([ fcs, empty_rules, combiner, possizer], data, my_config)
+my_system=System([ fcs, empty_rules, combiner, position_size, raw_data], data, my_config)
 
 my_system.positionSize.get_subsystem_position("EDOLLAR").tail(5)
 ```
@@ -535,7 +536,7 @@ my_config.use_instrument_weight_estimates = True
 my_config.use_instrument_div_mult_estimates = True
 my_config.instrument_weight_estimate=dict(method="shrinkage", date_method="in_sample") ## speeds things up
 
-my_system = System([my_account, fcs, my_rules, combiner, possizer,
+my_system = System([my_account, fcs, my_rules, combiner, position_size, raw_data,
                     portfolio], data, my_config)
 
 my_system.set_logging_level("on")
@@ -545,7 +546,7 @@ print(my_system.portfolio.get_instrument_diversification_multiplier())
 ```
 
 ```
-                CORN   EDOLLAR     SP500      US10
+                CORN   EDOLLAR     SP500_micro      US10
 2016-05-05  0.273715  0.245994  0.281982  0.198309
 2016-05-06  0.273715  0.245994  0.281982  0.198309
 2016-05-09  0.273715  0.245994  0.281982  0.198309
@@ -567,12 +568,12 @@ Alternatively we can just make up some instrument weights, and diversification m
 *Again if we really couldn't be bothered, this would default to equal weights and 1.0 respectively*
 
 ```python
-my_config.instrument_weights=dict(US10=.1, EDOLLAR=.4, CORN=.3, SP500=.8)
+my_config.instrument_weights=dict(US10=.1, EDOLLAR=.4, CORN=.3, SP500_micro=.8)
 my_config.instrument_div_multiplier=1.5
 my_config.use_instrument_weight_estimates = False
 my_config.use_instrument_div_mult_estimates = False
 
-my_system=System([ fcs, empty_rules, combiner, possizer, portfolio], data, my_config)
+my_system=System([ fcs, empty_rules, combiner, position_size, raw_data, portfolio], data, my_config)
 
 my_system.portfolio.get_notional_position("EDOLLAR").tail(5)
 ```
@@ -590,11 +591,11 @@ Freq: B, dtype: float64
 Although this is fine and dandy, we're probably going to be curious about whether this made money or not. So we'll need to add just one more stage, to count our virtual profits:
 
 ```python
-from systems.account import Account
+from systems.accounts.accounts_stage import Account
 accounts=Account()
-my_system=System([ fcs, empty_rules, combiner, possizer, portfolio, accounts], data, my_config)
+my_system=System([ fcs, empty_rules, combiner, position_size, raw_data, portfolio, accounts], data, my_config)
 profits=my_system.accounts.portfolio()
-profits.percent().stats()
+profits.percent.stats()
 ```
 
 ```
@@ -607,8 +608,8 @@ Once again we have the now familiar accounting object. Some results have been re
 These are profits net of tax. You can see the gross profits and costs:
 
 ```python
-profits.gross.percent().stats() ## all other things work eg profits.gross.sharpe()
-profits.costs.percent().stats()
+profits.gross.percent.stats() ## all other things work eg profits.gross.sharpe()
+profits.costs.percent.stats()
 ```
 
 For more see the costs and accountCurve section of the userguide.
@@ -620,7 +621,7 @@ To speed things up you can also pass a dictionary to `Config()`. To reproduce th
 
 ```python
 from sysdata.configdata import Config
-my_config=Config(dict(trading_rules=dict(ewmac8=ewmac_8, ewmac32=ewmac_32), instrument_weights=dict(US10=.1, EDOLLAR=.4, CORN=.3, SP500=.2), instrument_div_multiplier=1.5, forecast_scalars=dict(ewmac8=5.3, ewmac32=2.65), forecast_weights=dict(ewmac8=0.5, ewmac32=0.5), forecast_div_multiplier=1.1
+my_config=Config(dict(trading_rules=dict(ewmac8=ewmac_8, ewmac32=ewmac_32), instrument_weights=dict(US10=.1, EDOLLAR=.4, CORN=.3, SP500_micro=.2), instrument_div_multiplier=1.5, forecast_scalars=dict(ewmac8=5.3, ewmac32=2.65), forecast_weights=dict(ewmac8=0.5, ewmac32=0.5), forecast_div_multiplier=1.1
 ,percentage_vol_target=25, notional_trading_capital=500000, base_currency="GBP"))
 my_config
 ```

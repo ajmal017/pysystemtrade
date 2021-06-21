@@ -1,4 +1,5 @@
 from syscore.objects import arg_not_supplied
+from syscore.genutils import flatten_list
 from dataclasses import  dataclass
 import pandas as pd
 
@@ -27,6 +28,7 @@ class futuresInstrument(object):
     def __eq__(self, other):
         return self.instrument_code == other.instrument_code
 
+    @property
     def key(self):
         return self.instrument_code
 
@@ -103,9 +105,7 @@ class listOffuturesInstrumentWithMetaData(list):
             instrument_object.meta_data.as_dict().keys()
             for instrument_object in self
         ]
-        meta_data_keys_flattened = [
-            item for sublist in meta_data_keys for item in sublist
-        ]
+        meta_data_keys_flattened = flatten_list(meta_data_keys)
         meta_data_keys_unique = list(set(meta_data_keys_flattened))
 
         meta_data_as_lists = dict(
@@ -144,7 +144,7 @@ class assetClassesAndInstruments(dict):
         return assetClassesAndInstruments(as_dict)
 
     def all_asset_classes(self) -> list:
-        asset_classes = list(self.values)
+        asset_classes = list(self.values())
         unique_asset_classes = list(set(asset_classes))
         unique_asset_classes.sort()
 
@@ -203,14 +203,19 @@ class instrumentCosts(object):
     def value_of_pertrade_commission(self):
         return self._value_of_pertrade_commission
 
-    def calculate_cost_instrument_currency(self, blocks_traded, value_per_block = 0):
-        slippage = self.calculate_slippage(blocks_traded)
+    def calculate_cost_instrument_currency(self, blocks_traded: float,
+                                           block_price_multiplier: float,
+                                           price: float):
+        value_per_block = price * block_price_multiplier
+        slippage = self.calculate_slippage_instrument_currency(blocks_traded,
+                                                               block_price_multiplier= block_price_multiplier)
 
-        commission = self.calculate_total_commission(blocks_traded, value_per_block)
+        commission = self.calculate_total_commission(blocks_traded,
+                                                     value_per_block = value_per_block)
 
         return slippage + commission
 
-    def calculate_total_commission(self, blocks_traded, value_per_block):
+    def calculate_total_commission(self, blocks_traded: float, value_per_block: float):
         ### YOU WILL NEED TO CHANGE THIS IF YOUR BROKER HAS A MORE COMPLEX STRUCTURE
         per_trade_commission = self.calculate_per_trade_commission()
         per_block_commission = self.calculate_cost_per_block_commission(blocks_traded)
@@ -218,19 +223,20 @@ class instrumentCosts(object):
 
         return max([per_block_commission, per_trade_commission, percentage_commission])
 
-    def calculate_slippage(self, blocks_traded):
-        return blocks_traded * self.price_slippage
+    def calculate_slippage_instrument_currency(self, blocks_traded: float,
+                                               block_price_multiplier: float) -> float:
+        return abs(blocks_traded) * self.price_slippage * block_price_multiplier
 
     def calculate_per_trade_commission(self):
         return self.value_of_pertrade_commission
 
     def calculate_cost_per_block_commission(self, blocks_traded):
-        return blocks_traded * self.value_of_block_commission
+        return abs(blocks_traded) * self.value_of_block_commission
 
     def calculate_percentage_commission(self, blocks_traded, price_per_block):
         trade_value = self.calculate_trade_value(blocks_traded, price_per_block)
         return self._percentage_cost * trade_value
 
     def calculate_trade_value(self, blocks_traded, value_per_block):
-        return blocks_traded * value_per_block
+        return abs(blocks_traded) * value_per_block
 

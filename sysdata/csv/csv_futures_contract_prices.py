@@ -5,7 +5,7 @@ from sysdata.futures.futures_per_contract_prices import (
 )
 from sysobjects.futures_per_contract_prices import futuresContractPrices
 from sysobjects.contracts import futuresContract, listOfFuturesContracts
-from syslogdiag.log import logtoscreen
+from syslogdiag.log_to_screen import logtoscreen
 from syscore.fileutils import files_with_extension_in_pathname, get_filename_for_package
 from syscore.objects import arg_not_supplied
 from syscore.pdutils import pd_readcsv, DEFAULT_DATE_FORMAT
@@ -77,6 +77,13 @@ class csvFuturesContractPriceData(futuresContractPriceData):
         :return: tuple instrument_code, contract_date
         """
         keyname_as_list = keyname.split("_")
+
+        if len(keyname_as_list) == 4:
+            keyname_as_list = [
+                "%s_%s_%s" % (keyname_as_list[0], keyname_as_list[1], keyname_as_list[2]),
+                keyname_as_list[3],
+            ]
+
 
         # It's possible to have GAS_US_20090700.csv, so we only take the second
         if len(keyname_as_list) == 3:
