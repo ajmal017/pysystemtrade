@@ -1,7 +1,7 @@
+from syscore.objects import arg_not_supplied
 from sysdata.sim.csv_futures_sim_data import csvFuturesSimData
 from sysquant.estimators.vol import robust_vol_calc
-from systems.accounts.account_forecast import pandl_for_instrument_forecast
-from systems.provided.example.rules import ewmac_forecast_with_defaults as ewmac
+from systems.provided.rules.ewmac import ewmac_forecast_with_defaults as ewmac
 from systems.forecasting import Rules
 from systems.basesystem import System
 from systems.trading_rules import TradingRule
@@ -10,56 +10,90 @@ from systems.forecast_scale_cap import ForecastScaleCap
 from systems.forecast_combine import ForecastCombine
 from systems.accounts.accounts_stage import Account
 from systems.positionsizing import PositionSizing
-from systems.futures.rawdata import RawData
+from systems.rawdata import RawData
 from systems.portfolio import Portfolios
 import pytest
 from systems.provided.example.simplesystem import simplesystem
-from systems.provided.futures_chapter15.basesystem import futures_system as base_futures_system
+from systems.provided.futures_chapter15.basesystem import (
+    futures_system as base_futures_system,
+)
+
+
+
+@pytest.fixture()
+def data():
+    data = csvFuturesSimData()
+    return data
+
+
+@pytest.fixture()
+def raw_data():
+    return RawData()
+
+
+@pytest.fixture()
+def ewmac_8():
+    return TradingRule((ewmac, [], dict(Lfast=8, Lslow=32)))
+
+
+@pytest.fixture()
+def ewmac_32():
+    return TradingRule(dict(function=ewmac, other_args=dict(Lfast=32, Lslow=128)))
+
+
+@pytest.fixture()
+def my_rules(ewmac_8, ewmac_32):
+    return Rules(dict(ewmac8=ewmac_8, ewmac32=ewmac_32))
+
+
+@pytest.fixture()
+def my_config(ewmac_8, ewmac_32):
+    my_config = Config()
+    my_config.trading_rules = dict(ewmac8=ewmac_8, ewmac32=ewmac_32)
+    my_config.instruments = ["US10", "EDOLLAR", "CORN", "SP500"]
+    my_config.risk_overlay = arg_not_supplied
+    my_config.exclude_instrument_lists = dict(
+        ignore_instruments=["MILK"],
+        trading_restrictions=["BUTTER"],
+        bad_markets=["CHEESE"],
+    )
+
+    return my_config
+
+
+@pytest.fixture()
+def fcs():
+    return ForecastScaleCap()
+
+
+@pytest.fixture()
+def combiner():
+    return ForecastCombine()
+
+
+@pytest.fixture()
+def possizer():
+    return PositionSizing()
+
+
+@pytest.fixture()
+def account():
+    return Account()
+
+
+@pytest.fixture()
+def portfolio():
+    return Portfolios()
 
 
 class TestExamples:
+    """
+    This is (mostly) the code from 'examples.introduction.simplesystem',
+    but without graph plotting
+    """
 
-    def test_simple_trading_rule(self):
-        """
-        This is (mostly) the code from 'examples.introduction.asimpletradingrule',
-        but without graph plotting
-        """
-        # Get some data
-        data = csvFuturesSimData()
+    def test_simple_system_rules(self, data, raw_data):
 
-        print(data)
-        print(data.get_instrument_list())
-        print(data.get_raw_price("EDOLLAR").tail(5))
-
-        print(data["VIX"])
-        print(data.keys())
-        print(data.get_instrument_raw_carry_data("EDOLLAR").tail(6))
-
-        instrument_code = "VIX"
-        price = data.daily_prices(instrument_code)
-        ewmac = self.calc_ewmac_forecast(price, 32, 128)
-        ewmac2 = self.calc_ewmac_forecast(price, 16, 64)
-
-        ewmac.columns = ["forecast"]
-        print(ewmac.tail(5))
-
-        account = pandl_for_instrument_forecast(price=price, forecast=ewmac)
-        account2 = pandl_for_instrument_forecast(price=price, forecast=ewmac2)
-
-        account.curve()
-        account2.curve()
-
-        print(account.percent.stats())
-        print(account2.percent.stats())
-
-    @pytest.mark.slow  # will be skipped unless run with 'pytest --runslow'
-    def test_simple_system(self):
-        """
-        This is (mostly) the code from 'examples.introduction.simplesystem',
-        but without graph plotting
-        """
-        data = csvFuturesSimData()
-        raw_data = RawData()
         my_rules = Rules(ewmac)
         print(my_rules.trading_rules())
 
@@ -70,23 +104,22 @@ class TestExamples:
         print(my_system)
         print(my_system.rules.get_raw_forecast("EDOLLAR", "ewmac").tail(5))
 
+    def test_simple_system_trading_rule(self, data, raw_data, ewmac_8, ewmac_32):
+
         ewmac_rule = TradingRule(ewmac)
-        my_rules = Rules(dict(ewmac=ewmac_rule))
         print(ewmac_rule)
 
-        ewmac_8 = TradingRule((ewmac, [], dict(Lfast=8, Lslow=32)))
-        ewmac_32 = TradingRule(
-            dict(
-                function=ewmac,
-                other_args=dict(
-                    Lfast=32,
-                    Lslow=128)))
         my_rules = Rules(dict(ewmac8=ewmac_8, ewmac32=ewmac_32))
         print(my_rules.trading_rules()["ewmac32"])
 
         my_system = System([my_rules, raw_data], data)
         my_system.rules.get_raw_forecast("EDOLLAR", "ewmac32").tail(5)
 
+    def test_simple_system_trading_rules_estimated(
+        self, data, raw_data, ewmac_8, ewmac_32, fcs
+    ):
+
+        my_rules = Rules(dict(ewmac8=ewmac_8, ewmac32=ewmac_32))
         my_config = Config()
         print(my_config)
 
@@ -99,47 +132,65 @@ class TestExamples:
         my_config.instruments = ["US10", "EDOLLAR", "CORN", "SP500"]
         my_config.use_forecast_scale_estimates = True
 
-        fcs = ForecastScaleCap()
         my_system = System([fcs, my_rules, raw_data], data, my_config)
         my_config.forecast_scalar_estimate["pool_instruments"] = False
         print(
-            my_system.forecastScaleCap.get_forecast_scalar(
-                "EDOLLAR",
-                "ewmac32").tail(5))
+            my_system.forecastScaleCap.get_forecast_scalar("EDOLLAR", "ewmac32").tail(5)
+        )
+
+    def test_simple_system_trading_rules_fixed(self, data, my_rules, fcs):
 
         # or we can use the values from the book
+        my_config = Config()
+        my_config.trading_rules = dict(ewmac8=ewmac_8, ewmac32=ewmac_32)
+        my_config.instruments = ["US10", "EDOLLAR", "CORN", "SP500"]
         my_config.forecast_scalars = dict(ewmac8=5.3, ewmac32=2.65)
         my_config.use_forecast_scale_estimates = False
-        fcs = ForecastScaleCap()
+
         my_system = System([fcs, my_rules], data, my_config)
         print(
-            my_system.forecastScaleCap.get_capped_forecast(
-                "EDOLLAR",
-                "ewmac32").tail(5))
+            my_system.forecastScaleCap.get_capped_forecast("EDOLLAR", "ewmac32").tail(5)
+        )
+
+    def test_simple_system_combing_rules(
+        self, data, raw_data, my_rules, my_config, fcs
+    ):
 
         # defaults
         combiner = ForecastCombine()
         my_system = System([fcs, my_rules, combiner, raw_data], data, my_config)
         print(my_system.combForecast.get_forecast_weights("EDOLLAR").tail(5))
-        print(my_system.combForecast.get_forecast_diversification_multiplier("EDOLLAR").tail(5))
+        print(
+            my_system.combForecast.get_forecast_diversification_multiplier(
+                "EDOLLAR"
+            ).tail(5)
+        )
+
+    @pytest.mark.slow  # will be skipped unless run with 'pytest --runslow'
+    def test_simple_system_combining_and_estimating(
+        self, data, raw_data, my_rules, my_config, fcs, combiner, possizer, account
+    ):
 
         # estimates:
-        my_account = Account()
-        combiner = ForecastCombine()
-        possizer = PositionSizing()
-
-
         my_config.forecast_weight_estimate = dict(method="one_period")
         my_config.use_forecast_weight_estimates = True
         my_config.use_forecast_div_mult_estimates = True
 
-        my_system = System([my_account, fcs, my_rules, combiner, raw_data, possizer], data, my_config)
+        my_system = System(
+            [account, fcs, my_rules, combiner, raw_data, possizer], data, my_config
+        )
 
         # this is a bit slow, better to know what's going on
         my_system.set_logging_level("on")
 
         print(my_system.combForecast.get_forecast_weights("US10").tail(5))
-        print(my_system.combForecast.get_forecast_diversification_multiplier("US10").tail(5))
+        print(
+            my_system.combForecast.get_forecast_diversification_multiplier("US10").tail(
+                5
+            )
+        )
+
+    def test_simple_system_combining_fixed(self, data, raw_data, my_config, fcs):
 
         # fixed:
         my_config.forecast_weights = dict(ewmac8=0.5, ewmac32=0.5)
@@ -147,18 +198,25 @@ class TestExamples:
         my_config.use_forecast_weight_estimates = False
         my_config.use_forecast_div_mult_estimates = False
 
+        empty_rules = Rules()
         combiner = ForecastCombine()
         my_system = System(
             [fcs, empty_rules, combiner, raw_data], data, my_config
         )  # no need for accounts if no estimation done
         my_system.combForecast.get_combined_forecast("EDOLLAR").tail(5)
 
+    def test_simple_system_position_sizing(
+        self, data, raw_data, my_rules, my_config, fcs, combiner, possizer
+    ):
+
         # size positions
         my_config.percentage_vol_target = 25
         my_config.notional_trading_capital = 500000
         my_config.base_currency = "GBP"
 
-        my_system = System([fcs, my_rules, combiner, possizer, raw_data], data, my_config)
+        my_system = System(
+            [fcs, my_rules, combiner, possizer, raw_data], data, my_config
+        )
 
         print(my_system.positionSize.get_price_volatility("EDOLLAR").tail(5))
         print(my_system.positionSize.get_block_value("EDOLLAR").tail(5))
@@ -168,16 +226,24 @@ class TestExamples:
         print(my_system.positionSize.get_vol_target_dict())
         print(my_system.positionSize.get_subsystem_position("EDOLLAR").tail(5))
 
+    @pytest.mark.slow  # will be skipped unless run with 'pytest --runslow'
+    def test_simple_system_portfolio_estimated(
+        self, data, raw_data, my_rules, my_config, fcs, combiner, possizer, account
+    ):
+
         # portfolio - estimated
         portfolio = Portfolios()
 
         my_config.use_instrument_weight_estimates = True
         my_config.use_instrument_div_mult_estimates = True
         my_config.instrument_weight_estimate = dict(
-            method="shrinkage", date_method="in_sample")
+            method="shrinkage", date_method="in_sample"
+        )
 
         my_system = System(
-            [my_account, fcs, my_rules, combiner, possizer, portfolio, raw_data], data, my_config
+            [account, fcs, my_rules, combiner, possizer, portfolio, raw_data],
+            data,
+            my_config,
         )
 
         my_system.set_logging_level("on")
@@ -185,20 +251,44 @@ class TestExamples:
         print(my_system.portfolio.get_instrument_weights().tail(5))
         print(my_system.portfolio.get_instrument_diversification_multiplier().tail(5))
 
+    def test_simple_system_portfolio_fixed(
+        self, data, raw_data, my_rules, my_config, fcs, combiner, possizer, portfolio
+    ):
+
         # or fixed
-        portfolio = Portfolios()
         my_config.use_instrument_weight_estimates = False
         my_config.use_instrument_div_mult_estimates = False
         my_config.instrument_weights = dict(US10=0.1, EDOLLAR=0.4, CORN=0.3, SP500=0.2)
         my_config.instrument_div_multiplier = 1.5
+        my_config.forecast_weights = dict(ewmac8=0.5, ewmac32=0.5)
+        my_config.use_forecast_weight_estimates = False
 
-        my_system = System([fcs, my_rules, combiner, possizer,
-                            portfolio, raw_data], data, my_config)
+        my_system = System(
+            [fcs, my_rules, combiner, possizer, portfolio, raw_data], data, my_config
+        )
 
         print(my_system.portfolio.get_notional_position("EDOLLAR").tail(5))
 
+    def test_simple_system_costs(
+        self,
+        data,
+        raw_data,
+        my_rules,
+        my_config,
+        fcs,
+        combiner,
+        possizer,
+        portfolio,
+        account,
+    ):
+
+        my_config.forecast_weights = dict(ewmac8=0.5, ewmac32=0.5)
+        my_config.instrument_weights = dict(US10=0.1, EDOLLAR=0.4, CORN=0.3, SP500=0.2)
+
         my_system = System(
-            [fcs, my_rules, combiner, possizer, portfolio, my_account, raw_data], data, my_config
+            [fcs, my_rules, combiner, possizer, portfolio, account, raw_data],
+            data,
+            my_config,
         )
         profits = my_system.accounts.portfolio()
         print(profits.percent.stats())
@@ -206,6 +296,8 @@ class TestExamples:
         # have costs data now
         print(profits.gross.percent.stats())
         print(profits.net.percent.stats())
+
+    def test_simple_system_config_object(self, data, ewmac_8, ewmac_32):
 
         my_config = Config(
             dict(
@@ -217,7 +309,13 @@ class TestExamples:
                 forecast_div_multiplier=1.1,
                 percentage_vol_target=25.00,
                 notional_trading_capital=500000,
-                base_currency="GBP"
+                base_currency="GBP",
+                risk_overlay=arg_not_supplied,
+                exclude_instrument_lists=dict(
+                    ignore_instruments=["MILK"],
+                    trading_restrictions=["BUTTER"],
+                    bad_markets=["CHEESE"],
+                ),
             )
         )
         print(my_config)
@@ -229,14 +327,40 @@ class TestExamples:
                 ForecastCombine(),
                 ForecastScaleCap(),
                 Rules(),
-                RawData()
+                RawData(),
             ],
             data,
             my_config,
         )
         print(my_system.portfolio.get_notional_position("EDOLLAR").tail(5))
 
-        my_config = Config("systems.provided.example.simplesystemconfig.yaml")
+    @pytest.mark.slow  # will be skipped unless run with 'pytest --runslow'
+    def test_simple_system_risk_overlay(self, data, ewmac_8, ewmac_32):
+
+        my_config = Config(
+            dict(
+                trading_rules=dict(ewmac8=ewmac_8, ewmac32=ewmac_32),
+                instrument_weights=dict(US10=0.1, EDOLLAR=0.4, CORN=0.3, SP500=0.2),
+                instrument_div_multiplier=1.5,
+                forecast_scalars=dict(ewmac8=5.3, ewmac32=2.65),
+                forecast_weights=dict(ewmac8=0.5, ewmac32=0.5),
+                forecast_div_multiplier=1.1,
+                percentage_vol_target=25.00,
+                notional_trading_capital=500000,
+                base_currency="GBP",
+                risk_overlay=dict(
+                    max_risk_fraction_normal_risk=1.4,
+                    max_risk_fraction_stdev_risk=3.6,
+                    max_risk_limit_sum_abs_risk=3.4,
+                    max_risk_leverage=13.0,
+                ),
+                exclude_instrument_lists=dict(
+                    ignore_instruments=["MILK"],
+                    trading_restrictions=["BUTTER"],
+                    bad_markets=["CHEESE"],
+                ),
+            )
+        )
         print(my_config)
         my_system = System(
             [
@@ -246,7 +370,32 @@ class TestExamples:
                 ForecastCombine(),
                 ForecastScaleCap(),
                 Rules(),
-                RawData()
+                RawData(),
+            ],
+            data,
+            my_config,
+        )
+        print(my_system.portfolio.get_notional_position("EDOLLAR").tail(5))
+
+    def test_simple_system_config_import(self, data):
+
+        my_config = Config("systems.provided.example.simplesystemconfig.yaml")
+        my_config.risk_overlay = arg_not_supplied
+        my_config.exclude_instrument_lists = dict(
+            ignore_instruments=["MILK"],
+            trading_restrictions=["BUTTER"],
+            bad_markets=["CHEESE"],
+        )
+        print(my_config)
+        my_system = System(
+            [
+                Account(),
+                Portfolios(),
+                PositionSizing(),
+                ForecastCombine(),
+                ForecastScaleCap(),
+                Rules(),
+                RawData(),
             ],
             data,
             my_config,
@@ -254,9 +403,8 @@ class TestExamples:
         print(my_system.rules.get_raw_forecast("EDOLLAR", "ewmac32").tail(5))
         print(my_system.rules.get_raw_forecast("EDOLLAR", "ewmac8").tail(5))
         print(
-            my_system.forecastScaleCap.get_capped_forecast(
-                "EDOLLAR",
-                "ewmac32").tail(5))
+            my_system.forecastScaleCap.get_capped_forecast("EDOLLAR", "ewmac32").tail(5)
+        )
         print(my_system.forecastScaleCap.get_forecast_scalar("EDOLLAR", "ewmac32"))
         print(my_system.combForecast.get_combined_forecast("EDOLLAR").tail(5))
         print(my_system.combForecast.get_forecast_weights("EDOLLAR").tail(5))
@@ -271,6 +419,7 @@ class TestExamples:
         This is the simple system from 'examples.introduction.prebakedsimplesystems'
         """
         my_system = simplesystem(log_level="on")
+        my_system.config.risk_overlay = arg_not_supplied
         print(my_system)
         print(my_system.portfolio.get_notional_position("EDOLLAR").tail(5))
 
@@ -280,6 +429,7 @@ class TestExamples:
         This is the config system from 'examples.introduction.prebakedsimplesystems'
         """
         my_config = Config("systems.provided.example.simplesystemconfig.yaml")
+        my_config.risk_overlay = arg_not_supplied
         my_data = csvFuturesSimData()
         my_system = simplesystem(config=my_config, data=my_data)
         print(my_system.portfolio.get_notional_position("EDOLLAR").tail(5))
@@ -291,6 +441,7 @@ class TestExamples:
         but without graph plotting
         """
         system = base_futures_system(log_level="on")
+        system.config.risk_overlay = arg_not_supplied
         print(system.accounts.portfolio().sharpe())
 
     @staticmethod

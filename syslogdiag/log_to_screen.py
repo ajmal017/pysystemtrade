@@ -1,14 +1,11 @@
 from syslogdiag.logger import logger
+from syslogdiag.log_entry import logEntry
 
 
 class logtoscreen(logger):
-
     def log_handle_caller(
-            self,
-            msglevel: int,
-            text: str,
-            attributes: dict,
-            log_id: int):
+        self, msglevel: int, text: str, attributes: dict, log_id: int
+    ):
         """
         >>> log=logtoscreen("base_system", log_level="off") ## this won't do anything
         >>> log.log("this wont print")
@@ -27,28 +24,35 @@ class logtoscreen(logger):
         """
         log_level = self.logging_level
 
+        log_entry = logEntry(
+            text,
+            msglevel=msglevel,
+            attributes=attributes,
+            log_id=log_id
+        )
+
         if msglevel == 0:
             if log_level == "on":
-                print(text)
+                print(log_entry)
                 # otherwise do nothing - either terse or off
 
         elif msglevel == 1:
             if log_level in ["on", "terse"]:
-                print(text)
+                print(log_entry)
                 # otherwise do nothing - either terse or off
 
         elif msglevel == 2:
-            print(text)
+            print(log_entry)
 
         elif msglevel == 3:
-            print(text)
+            print(log_entry)
 
         elif msglevel == 4:
-            raise Exception(text)
+            raise Exception(log_entry)
 
     def get_next_log_id(self) -> int:
         last_id = self.get_last_used_log_id()
-        next_id = last_id+1
+        next_id = last_id + 1
 
         self.update_log_id(next_id)
 

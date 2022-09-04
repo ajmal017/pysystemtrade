@@ -12,26 +12,35 @@ trading_rules - a specification of the trading rules for a system
 
 """
 
+from pathlib import Path
+
 import yaml
+
 from syscore.fileutils import get_filename_for_package
 from syscore.objects import missing_data, arg_not_supplied
 from sysdata.config.defaults import get_system_defaults_dict
+from sysdata.config.private_config import get_private_config_as_dict
 from syslogdiag.log_to_screen import logtoscreen
 from sysdata.config.fill_config_dict_with_defaults import fill_config_dict_with_defaults
 
-RESERVED_NAMES = ["log", "_elements", "elements", "_default_filename", "_default_dict"]
+RESERVED_NAMES = ["log", "_elements", "elements",
+                  "_default_filename",
+                  "_private_filename"]
 
 
 class Config(object):
-    def __init__(self, config_object=arg_not_supplied,
-                 default_filename = arg_not_supplied):
+    def __init__(
+        self, config_object=arg_not_supplied,
+            default_filename=arg_not_supplied,
+            private_filename = arg_not_supplied
+    ):
         """
         Config objects control the behaviour of systems
 
         :param config_object: Either:
                         a string (which points to a YAML filename)
                         or a dict (which may nest many things)
-                        or a list of strings or dicts (build config from
+                        or a list of strings or dicts or configs (build config from
                         multiple elements, latter elements will overwrite
                         earlier oness)
 
@@ -51,9 +60,10 @@ class Config(object):
         """
 
         # this will normally be overriden by the base system
-        self.log= logtoscreen(type="config", stage="config")
+        self.log = logtoscreen(type="config", stage="config")
 
         self._default_filename = default_filename
+        self._private_filename = private_filename
 
         if config_object is arg_not_supplied:
             config_object = dict()
@@ -65,7 +75,6 @@ class Config(object):
         elements = getattr(self, "_elements", [])
 
         return elements
-
 
     def add_elements(self, new_elements: list):
         _ = [self.add_single_element(element_name) for element_name in new_elements]
@@ -88,7 +97,7 @@ class Config(object):
 
     def get_element_or_arg_not_supplied(self, element_name):
         result = getattr(self, element_name, arg_not_supplied)
-        return  result
+        return result
 
     def __repr__(self):
         elements = self.elements
@@ -104,7 +113,6 @@ class Config(object):
 
         self._create_config_from_list(config_list)
 
-
     def _create_config_from_list(self, config_object):
         for config_item in config_object:
             self._create_config_from_item(config_item)
@@ -114,15 +122,16 @@ class Config(object):
             # its a dict
             self._create_config_from_dict(config_item)
 
-        elif isinstance(config_item, str):
+        elif isinstance(config_item, str) or isinstance(config_item, Path):
             # must be a file YAML'able, from which we load the
             filename = get_filename_for_package(config_item)
             with open(filename) as file_to_parse:
-                dict_to_parse = yaml.load(
-                    file_to_parse, Loader=yaml.FullLoader)
+                dict_to_parse = yaml.load(file_to_parse, Loader=yaml.FullLoader)
 
             self._create_config_from_dict(dict_to_parse)
 
+        elif isinstance(config_item, Config):
+            self._create_config_from_dict(config_item.as_dict())
         else:
             error_msg = (
                 "Can only create a config with a nested dict or the "
@@ -145,8 +154,7 @@ class Config(object):
             self._create_config_from_item(base_config)
 
         attr_names = list(config_object.keys())
-        [setattr(self, keyname, config_object[keyname])
-         for keyname in config_object]
+        [setattr(self, keyname, config_object[keyname]) for keyname in config_object]
 
         self.add_elements(attr_names)
 
@@ -179,7 +187,7 @@ class Config(object):
 
         self.remove_element(element_name)
 
-    def __setattr__(self, element_name:str, value):
+    def __setattr__(self, element_name: str, value):
         """
         Add / replace element_name in config
 
@@ -198,32 +206,19 @@ class Config(object):
 
     def fill_with_defaults(self):
         """
-        Fills with defaults
-        >>> config=Config(dict(forecast_cap=22.0, forecast_scalar_estimate=dict(backfill=False), forecast_weight_estimate=dict(correlation_estimate=dict(min_periods=40))))
-        >>> config
-        Config with elements: forecast_cap, forecast_scalar_estimate, forecast_weight_estimate
-import sysquant.estimators.forecast_scalar        >>> config.fill_with_defaults()
-        >>> sysquant.estimators.forecast_scalar.forecast_scalar
-        1.0
-        >>> config.forecast_cap
-        22.0
-        >>> config.forecast_scalar_estimate['pool_instruments']
-        True
-        >>> config.forecast_scalar_estimate['backfill']
-        False
-        >>> config.forecast_weight_estimate['correlation_estimate']['min_periods']
-        40
-        >>> config.forecast_weight_estimate['correlation_estimate']['ew_lookback']
-        500
+        Fills with defaults - private stuff first, then defaults
         """
         self.log.msg("Adding config defaults")
 
         self_as_dict = self.as_dict()
         defaults_dict = self.default_config_dict
+        private_dict = self.private_config_dict
 
-        new_dict = fill_config_dict_with_defaults(self_as_dict, defaults_dict)
+        ## order is - self (backtest filename), private, defaults
+        new_dict_with_private = fill_config_dict_with_defaults(self_as_dict, private_dict)
+        new_dict_with_defaults = fill_config_dict_with_defaults(new_dict_with_private, defaults_dict)
 
-        self._create_config_from_dict(new_dict)
+        self._create_config_from_dict(new_dict_with_defaults)
 
     @property
     def default_config_dict(self) -> dict:
@@ -238,6 +233,19 @@ import sysquant.estimators.forecast_scalar        >>> config.fill_with_defaults(
 
         return default_filename
 
+    @property
+    def private_config_dict(self) -> dict:
+        private_filename = self.private_config_filename
+        private_dict = get_private_config_as_dict(private_filename)
+
+        return private_dict
+
+    @property
+    def private_config_filename(self):
+        private_filename = getattr(self, "_private_filename", arg_not_supplied)
+
+        return private_filename
+
     def as_dict(self):
         element_names = sorted(getattr(self, "_elements", []))
         self_as_dict = {}
@@ -251,6 +259,12 @@ import sysquant.estimators.forecast_scalar        >>> config.fill_with_defaults(
         with open(filename, "w") as file:
             yaml.dump(config_to_save, file)
 
+
+def default_config():
+    config = Config()
+    config.fill_with_defaults()
+
+    return config
 
 if __name__ == "__main__":
     import doctest

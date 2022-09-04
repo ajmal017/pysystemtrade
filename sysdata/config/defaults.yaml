@@ -21,7 +21,7 @@ strategy_capital_allocation:
 #    example: 100.0
 #
 ## Where do we save backtests
-backtest_store_directory: 'backtests'
+backtest_store_directory: 'private'
 #
 # And backups
 csv_backup_directory: 'data.backups_csv'
@@ -33,6 +33,9 @@ ib_ipaddress: 127.0.0.1
 ib_port: 4001
 ib_idoffset: 100
 #
+# Broker class list resolution function
+broker_factory_func: 'sysbrokers.broker_factory.get_ib_class_list'
+#
 # Mongo DB
 mongo_host: 127.0.0.1
 mongo_db: 'production'
@@ -43,7 +46,15 @@ mongo_port: 27017
 # Needs to be consistent with what you are using in crontab
 echo_extension: '.txt'
 # Spike checker
-max_price_spike: 8
+max_price_spike: 8.0
+# Default get_GMT_offset_hours
+GMT_offset_hours: 0
+# Behaviour of price filtering
+ignore_future_prices: True
+ignore_prices_with_zero_volumes_intraday: True
+ignore_prices_with_zero_volumes_daily: False
+ignore_zero_prices: True
+ignore_negative_prices: False
 #
 # Price frequency (we collect daily data, and separately this frequency
 intraday_frequency: H
@@ -56,14 +67,12 @@ production_capital_method: 'full'
 # Raw data
 #
 volatility_calculation:
-  func: "sysquant.estimators.vol.robust_vol_calc"
+  func: "sysquant.estimators.vol.mixed_vol_calc"
   days: 35
   min_periods: 10
+  slow_vol_years: 10
+  proportion_of_slow_vol: 0.3
   vol_abs_min: 0.0000000001
-  vol_floor: True
-  floor_min_quant: 0.05
-  floor_min_periods: 100
-  floor_days: 500
 #
 # forecast capping and scaling
 # fixed values
@@ -149,7 +158,7 @@ forecast_weight_estimate:
      using_exponent: True
      ew_lookback: 50000
      min_periods: 10
-     cleaning: True
+     cleaning: False
      floor_at_zero: False
    mean_estimate:
      func: sysquant.estimators.mean_estimator.meanEstimator
@@ -181,7 +190,7 @@ instrument_correlation_estimate:
    frequency: "W"
    date_method: "expanding"
    using_exponent: True
-   ew_lookback: 250
+   ew_lookback: 25
    min_periods: 20
    cleaning: True
    rollyears: 20
@@ -220,8 +229,8 @@ instrument_weight_estimate:
      using_exponent: True
      ew_lookback: 500000
      min_periods: 10
-     floor_at_zero: False
-     cleaning: True
+     floor_at_zero: True
+     cleaning: False
    mean_estimate:
      func: sysquant.estimators.mean_estimator.meanEstimator
      using_exponent: True
@@ -238,10 +247,78 @@ buffer_method: position
 buffer_size: 0.10
 buffer_trade_to_edge: False
 # costs and accounting
-use_SR_costs: True
+use_SR_costs: False
+vol_normalise_currency_costs: True
 #
-# risk overlay
-risk_overlay:
-  max_risk_fraction_normal_risk: 2.0
-  max_risk_fraction_correlation_risk: 4.0
-  max_risk_fraction_stdev_risk: 6.0
+# risk overlay - make these numbers and uncomment
+#risk_overlay:
+#  max_risk_fraction_normal_risk: 99999
+#  max_risk_fraction_stdev_risk: 99999
+#  max_risk_limit_sum_abs_risk: 99999
+#  max_risk_leverage: 99999
+#
+instrument_returns_correlation:
+  func: sysquant.estimators.correlation_over_time.correlation_over_time_for_returns
+  interval_frequency: "W"
+  frequency: "7D"
+  date_method: "rolling"
+  using_exponent: True
+  ew_lookback: 75
+  min_periods: 10
+  cleaning: True
+  offdiag: 0.0
+  rollyears: 5
+  floor_at_zero: False
+  forward_fill_price_index: True
+  clip: 0.99
+# small system optimisation
+small_system:
+  shadow_cost: 50
+  cost_multiplier: 1.0
+  tracking_error_buffer: 0.0125
+  shrink_instrument_returns_correlation: 0.5
+#
+# duplicated/excluded instruments are ignored in backtests
+# we still collect price data for them in production, do rolls etc
+# this is to avoid double counting of basically the same instrument
+# anything in the 'exclude' list is ignored in backtests
+# we use the 'include section to match up for reporting when deciding which to trade
+# Be careful when swapping between instruments, a bit dangerous if a position is held...
+# You can override this by modifying the backtest config .yaml file used in either sim or production
+#
+# THe following example shows how you would select one instrument out of a choice of 3
+#
+duplicate_instruments:
+  include:
+    things: 'thing_we_want'
+  exclude:
+    things: ['bad_thing', 'Another_thing']
+exclude_instrument_lists:
+  # ignore_instruments are ignored in backtests
+  # we still collect price data for them in production, do rolls etc
+  # You can override this by modifying the backtest config .yaml file used in either sim or production
+  # If you want to ignore because a duplicate market, use duplicate_instruments
+  # If you want to include in sim data, but not actually trade, use trading_restrictions
+  #
+  # BEST FOR INSTRUMENTS THAT LOOK EXPENSIVE, BUT WHERE WE HAVEN'T GOT ACCURATE DATA YET
+  #
+  # REVIEW REGULARLY AND CHECK THESE INSTRUMENTS AREN'T BETTER ELSEWHERE...
+  ignore_instruments:
+    - 'EXAMPLE'
+  #
+  # Here we put stuff we can't trade, but for which we still want to bring in prices in sim
+  # For the dynamically optimised strategy this list will be used in sim as 'don't trade'
+  # For static strategies, you will probably want to set these to zero instrument weights
+  # In production, things here will be added to the 'reduce_only' list of instruments
+  # NOTE: This will be regionally biased, you will probably want to override this in private_config.yaml
+  #
+  trading_restrictions:
+    - RESTRICTED_EXAMPLE
+  # These are markets that are too expensive or illiquid to actually trade
+  # For the dynamically optimised strategy this list will be used in sim as 'don't trade'
+  # For static strategies, you will probably want to set these to zero instrument weights
+  # In production, things here will be added to the 'reduce_only' list of instruments
+  # Run interactive controls to get a list of suggested markets here
+  # To override this list, change in sim .yaml config (sim) and private_config.yaml (production)
+  bad_markets:
+    - BAD_EXAMPLE

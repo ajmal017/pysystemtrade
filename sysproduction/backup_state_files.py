@@ -1,7 +1,9 @@
 import os
 
-from sysproduction.data.directories import get_statefile_directory, \
-    get_statefile_backup_directory
+from sysproduction.data.directories import (
+    get_statefile_directory,
+    get_statefile_backup_directory,
+)
 from sysdata.data_blob import dataBlob
 
 
@@ -30,3 +32,5 @@ def backup_state_files_with_data_object(data):
     os.system("rsync -av %s %s" % (source_path, destination_path))
 
 
+if __name__ == '__main__':
+    backup_state_files()

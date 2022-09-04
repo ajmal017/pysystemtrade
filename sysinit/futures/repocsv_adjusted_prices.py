@@ -13,13 +13,16 @@ if __name__ == "__main__":
     csv_adj_datapath = arg_not_supplied
     csv_adjusted_prices = csvFuturesAdjustedPricesData(csv_adj_datapath)
 
-    instrument_list = csv_adjusted_prices.get_list_of_instruments()
+    instrument_code = input("Instrument code? <return for ALL instruments> ")
+    if instrument_code == "":
+        instrument_list = csv_adjusted_prices.get_list_of_instruments()
+    else:
+        instrument_list = [instrument_code]
 
     for instrument_code in instrument_list:
         print(instrument_code)
 
-        adjusted_prices = csv_adjusted_prices.get_adjusted_prices(
-            instrument_code)
+        adjusted_prices = csv_adjusted_prices.get_adjusted_prices(instrument_code)
 
         print(adjusted_prices)
 
