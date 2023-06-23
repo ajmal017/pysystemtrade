@@ -2,7 +2,8 @@ import datetime
 
 import numpy as np
 
-from syscore.objects import missing_contract, arg_not_supplied, missing_data
+from syscore.exceptions import missingData
+from syscore.constants import arg_not_supplied
 from syscore.dateutils import Frequency, from_config_frequency_to_frequency, n_days_ago
 
 from sysobjects.contracts import futuresContract
@@ -39,13 +40,16 @@ from sysdata.data_blob import dataBlob
 from sysobjects.multiple_prices import price_name
 from sysobjects.contract_dates_and_expiries import listOfContractDateStr
 from sysproduction.data.currency_data import dataCurrency
+from sysproduction.data.instruments import get_stale_instruments
 
 from sysproduction.data.generic_production_data import productionDataLayerGeneric
+
 
 ## default for spike checking
 from sysproduction.data.instruments import diagInstruments, get_block_size
 
 VERY_BIG_NUMBER = 999999.0
+
 
 class diagPrices(productionDataLayerGeneric):
     def _add_required_classes_to_data(self, data) -> dataBlob:
@@ -65,11 +69,11 @@ class diagPrices(productionDataLayerGeneric):
         intraday_frequency_as_str = config.get_element_or_missing_data(
             "intraday_frequency"
         )
-        intraday_frequency = from_config_frequency_to_frequency(
-            intraday_frequency_as_str
-        )
-
-        if intraday_frequency is missing_data:
+        try:
+            intraday_frequency = from_config_frequency_to_frequency(
+                intraday_frequency_as_str
+            )
+        except missingData:
             error_msg = (
                 "Intraday frequency of %s is not recognised as a valid frequency"
                 % str(intraday_frequency)
@@ -86,10 +90,14 @@ class diagPrices(productionDataLayerGeneric):
 
         return adjusted_prices
 
-    def get_list_of_instruments_in_multiple_prices(self) -> list:
+    def get_list_of_instruments_in_multiple_prices(
+        self, ignore_stale: bool = True
+    ) -> list:
         list_of_instruments = (
             self.db_futures_multiple_prices_data.get_list_of_instruments()
         )
+        if ignore_stale:
+            list_of_instruments = self.remove_stale_instruments(list_of_instruments)
 
         return list_of_instruments
 
@@ -103,22 +111,22 @@ class diagPrices(productionDataLayerGeneric):
     def get_merged_prices_for_contract_object(
         self, contract_object: futuresContract
     ) -> futuresContractPrices:
-        prices = self.db_futures_contract_price_data.get_merged_prices_for_contract_object(
-            contract_object
+        prices = (
+            self.db_futures_contract_price_data.get_merged_prices_for_contract_object(
+                contract_object
+            )
         )
 
         return prices
 
     def get_prices_at_frequency_for_contract_object(
-        self, contract_object: futuresContract,
-            frequency: Frequency
+        self, contract_object: futuresContract, frequency: Frequency
     ) -> futuresContractPrices:
-        prices = self.db_futures_contract_price_data.\
-            get_prices_at_frequency_for_contract_object(contract_object,
-                                                        frequency=frequency)
+        prices = self.db_futures_contract_price_data.get_prices_at_frequency_for_contract_object(
+            contract_object, frequency=frequency
+        )
 
         return prices
-
 
     def get_current_priced_contract_prices_for_instrument(
         self, instrument_code: str
@@ -128,10 +136,17 @@ class diagPrices(productionDataLayerGeneric):
 
         return current_priced_contract_prices
 
-    def get_list_of_instruments_with_contract_prices(self) -> list:
+    def get_list_of_instruments_with_contract_prices(
+        self, ignore_stale: bool = True
+    ) -> list:
         unique_list_of_instruments = (
             self.db_futures_contract_price_data.get_list_of_instrument_codes_with_merged_price_data()
         )
+
+        if ignore_stale:
+            unique_list_of_instruments = self.remove_stale_instruments(
+                unique_list_of_instruments
+            )
 
         return unique_list_of_instruments
 
@@ -180,8 +195,6 @@ class diagPrices(productionDataLayerGeneric):
     ) -> dictFuturesContractPrices:
         dict_of_prices = {}
         for contract_date_str in list_of_contract_date_str:
-            if contract_date_str is missing_contract:
-                continue
             # Could blow up here if don't have prices for a contract??
             contract = futuresContract(instrument_code, contract_date_str)
             prices = self.get_merged_prices_for_contract_object(contract)
@@ -194,8 +207,29 @@ class diagPrices(productionDataLayerGeneric):
     def get_spreads(self, instrument_code: str) -> spreadsForInstrument:
         return self.db_spreads_for_instrument_data.get_spreads(instrument_code)
 
-    def get_list_of_instruments_with_spread_data(self) -> list:
-        return self.db_spreads_for_instrument_data.get_list_of_instruments()
+    def get_list_of_instruments_with_spread_data(
+        self, ignore_stale: bool = True
+    ) -> list:
+        list_of_instruments = (
+            self.db_spreads_for_instrument_data.get_list_of_instruments()
+        )
+        if ignore_stale:
+            list_of_instruments = self.remove_stale_instruments(list_of_instruments)
+
+        return list_of_instruments
+
+    def remove_stale_instruments(self, list_of_instruments: list) -> list:
+        stale_instruments = self.get_stale_instruments()
+        list_of_instruments = [
+            instrument_code
+            for instrument_code in list_of_instruments
+            if not instrument_code in stale_instruments
+        ]
+
+        return list_of_instruments
+
+    def get_stale_instruments(self) -> list:
+        return get_stale_instruments(self.data)
 
     @property
     def db_futures_adjusted_prices_data(self) -> futuresAdjustedPricesData:
@@ -234,10 +268,23 @@ class updatePrices(productionDataLayerGeneric):
         new_prices: futuresContractPrices,
     ):
 
-        self.db_futures_contract_price_data.write_merged_prices_for_contract_object(contract_object,
-                                                                                    futures_price_data=new_prices,
-                                                                                    ignore_duplication=True)
+        self.db_futures_contract_price_data.write_merged_prices_for_contract_object(
+            contract_object, futures_price_data=new_prices, ignore_duplication=True
+        )
 
+    def overwrite_prices_at_frequency_for_contract(
+        self,
+        contract_object: futuresContract,
+        new_prices: futuresContractPrices,
+        frequency: Frequency,
+    ):
+
+        self.db_futures_contract_price_data.write_prices_at_frequency_for_contract_object(
+            futures_contract_object=contract_object,
+            futures_price_data=new_prices,
+            frequency=frequency,
+            ignore_duplication=True,
+        )
 
     def update_prices_at_frequency_for_contract(
         self,
@@ -245,16 +292,16 @@ class updatePrices(productionDataLayerGeneric):
         frequency: Frequency,
         new_prices: futuresContractPrices,
         check_for_spike: bool = True,
-        max_price_spike: float = VERY_BIG_NUMBER
+        max_price_spike: float = VERY_BIG_NUMBER,
     ) -> int:
 
         error_or_rows_added = (
             self.db_futures_contract_price_data.update_prices_at_frequency_for_contract(
                 contract_object=contract_object,
-                new_futures_per_contract_prices =new_prices,
+                new_futures_per_contract_prices=new_prices,
                 frequency=frequency,
                 check_for_spike=check_for_spike,
-                max_price_spike = max_price_spike
+                max_price_spike=max_price_spike,
             )
         )
         return error_or_rows_added
@@ -283,9 +330,38 @@ class updatePrices(productionDataLayerGeneric):
             ignore_duplication=ignore_duplication,
         )
 
+    def delete_merged_contract_prices_for_instrument_code(
+        self, instrument_code: str, are_you_sure: bool = False
+    ):
+        self.db_futures_contract_price_data.delete_merged_prices_for_instrument_code(
+            instrument_code, areyousure=are_you_sure
+        )
+
+    def delete_contract_prices_at_frequency_for_instrument_code(
+        self, instrument_code: str, frequency: Frequency, are_you_sure: bool = False
+    ):
+        self.db_futures_contract_price_data.delete_prices_at_frequency_for_instrument_code(
+            instrument_code, frequency=frequency, areyousure=are_you_sure
+        )
+
+    def delete_adjusted_prices(self, instrument_code: str, are_you_sure: bool = False):
+        self.db_futures_adjusted_prices_data.delete_adjusted_prices(
+            instrument_code, are_you_sure=are_you_sure
+        )
+
+    def delete_multiple_prices(self, instrument_code: str, are_you_sure: bool = False):
+        self.db_futures_multiple_prices_data.delete_multiple_prices(
+            instrument_code, are_you_sure=are_you_sure
+        )
+
     def add_spread_entry(self, instrument_code: str, spread: float):
         self.db_spreads_for_instrument_data.add_spread_entry(
             instrument_code, spread=spread
+        )
+
+    def delete_spreads(self, instrument_code: str, are_you_sure: bool = False):
+        self.db_spreads_for_instrument_data.delete_spreads(
+            instrument_code, are_you_sure=are_you_sure
         )
 
     @property
@@ -303,6 +379,9 @@ class updatePrices(productionDataLayerGeneric):
     @property
     def db_spreads_for_instrument_data(self) -> spreadsForInstrumentData:
         return self.data.db_spreads_for_instrument
+
+
+INSTRUMENT_CODE_SOURCE_CONFIG = "config"
 
 
 def get_valid_instrument_code_from_user(
@@ -351,8 +430,13 @@ def get_list_of_instruments(
         instrument_list = price_data.get_list_of_instruments_in_multiple_prices()
     elif source == "single":
         instrument_list = price_data.get_list_of_instruments_with_contract_prices()
+    elif source == INSTRUMENT_CODE_SOURCE_CONFIG:
+        instrument_data = diagInstruments(data)
+        instrument_list = instrument_data.get_list_of_instruments()
     else:
-        raise Exception("%s not recognised must be multiple or single" % source)
+        raise Exception(
+            "%s not recognised must be multiple or single or config" % source
+        )
 
     instrument_list.sort()
 
@@ -418,3 +502,34 @@ def last_currency_fx(data: dataBlob, instrument_code: str) -> float:
     fx_rate = data_currency.get_last_fx_rate_to_base(currency)
 
     return fx_rate
+
+
+def modify_price_when_contract_has_changed(
+    data: dataBlob,
+    instrument_code: str,
+    new_contract_date: str,
+    original_contract_date: str,
+    original_price: float,
+) -> float:
+
+    if original_contract_date == new_contract_date:
+        return original_price
+
+    diag_prices = diagPrices(data)
+    contract_list = [original_contract_date, new_contract_date]
+    (
+        _last_matched_date,
+        list_of_matching_prices,
+    ) = diag_prices.get_last_matched_date_and_prices_for_contract_list(
+        instrument_code, contract_list
+    )
+    differential = list_of_matching_prices[1] - list_of_matching_prices[0]
+
+    if np.isnan(differential):
+        # can't adjust
+        # note need to test code there may be other ways in which this fails
+        raise missingData
+
+    adjusted_price = original_price + differential
+
+    return adjusted_price

@@ -13,26 +13,42 @@ trading_rules - a specification of the trading rules for a system
 """
 
 from pathlib import Path
+import os
+from typing import Any
 
 import yaml
 
-from syscore.fileutils import get_filename_for_package
-from syscore.objects import missing_data, arg_not_supplied
+from syscore.exceptions import missingData
+from syscore.fileutils import resolve_path_and_filename_for_package
+from syscore.constants import missing_data, arg_not_supplied
 from sysdata.config.defaults import get_system_defaults_dict
-from sysdata.config.private_config import get_private_config_as_dict
+from sysdata.config.private_config import (
+    get_private_config_as_dict,
+    PRIVATE_CONFIG_FILE,
+)
+from sysdata.config.private_directory import (
+    get_full_path_for_private_config,
+    PRIVATE_CONFIG_DIR_ENV_VAR,
+)
 from syslogdiag.log_to_screen import logtoscreen
+from syslogdiag.pst_logger import TYPE_LOG_LABEL, STAGE_LOG_LABEL
 from sysdata.config.fill_config_dict_with_defaults import fill_config_dict_with_defaults
 
-RESERVED_NAMES = ["log", "_elements", "elements",
-                  "_default_filename",
-                  "_private_filename"]
+RESERVED_NAMES = [
+    "log",
+    "_elements",
+    "elements",
+    "_default_filename",
+    "_private_filename",
+]
 
 
 class Config(object):
     def __init__(
-        self, config_object=arg_not_supplied,
-            default_filename=arg_not_supplied,
-            private_filename = arg_not_supplied
+        self,
+        config_object=arg_not_supplied,
+        default_filename=arg_not_supplied,
+        private_filename=arg_not_supplied,
     ):
         """
         Config objects control the behaviour of systems
@@ -42,7 +58,7 @@ class Config(object):
                         or a dict (which may nest many things)
                         or a list of strings or dicts or configs (build config from
                         multiple elements, latter elements will overwrite
-                        earlier oness)
+                        earlier ones)
 
         :type config_object: str or dict
 
@@ -51,16 +67,16 @@ class Config(object):
         >>> Config(dict(parameters=dict(p1=3, p2=4.6), another_thing=[]))
         Config with elements: another_thing, parameters
 
-        >>> Config("sysdata.tests.exampleconfig.yaml")
-        Config with elements: parameters, trading_rules
+        >>> Config("systems.provided.example.exampleconfig.yaml")
+        Config with elements: base_currency, ... trading_rules
 
-        >>> Config(["sysdata.tests.exampleconfig.yaml", dict(parameters=dict(p1=3, p2=4.6), another_thing=[])])
-        Config with elements: another_thing, parameters, trading_rules
+        >>> Config(["systems.provided.example.exampleconfig.yaml", dict(parameters=dict(p1=3, p2=4.6), another_thing=[])])
+        Config with elements: another_thing, ... parameters, ...trading_rules
 
         """
 
         # this will normally be overriden by the base system
-        self.log = logtoscreen(type="config", stage="config")
+        self.log = logtoscreen(**{TYPE_LOG_LABEL: "config", STAGE_LOG_LABEL: "config"})
 
         self._default_filename = default_filename
         self._private_filename = private_filename
@@ -91,13 +107,22 @@ class Config(object):
                 elements.append(element_name)
                 self._elements = elements
 
-    def get_element_or_missing_data(self, element_name):
-        result = getattr(self, element_name, missing_data)
+    def get_element(self, element_name):
+        try:
+            result = getattr(self, element_name)
+        except AttributeError:
+            raise missingData("Missing config element %s" % element_name)
         return result
 
-    def get_element_or_arg_not_supplied(self, element_name):
-        result = getattr(self, element_name, arg_not_supplied)
+    def get_element_or_default(self, element_name, default):
+        result = getattr(self, element_name, default)
         return result
+
+    def get_element_or_missing_data(self, element_name):
+        return self.get_element_or_default(element_name, missing_data)
+
+    def get_element_or_arg_not_supplied(self, element_name):
+        return self.get_element_or_default(element_name, arg_not_supplied)
 
     def __repr__(self):
         elements = self.elements
@@ -124,7 +149,7 @@ class Config(object):
 
         elif isinstance(config_item, str) or isinstance(config_item, Path):
             # must be a file YAML'able, from which we load the
-            filename = get_filename_for_package(config_item)
+            filename = resolve_path_and_filename_for_package(config_item)
             with open(filename) as file_to_parse:
                 dict_to_parse = yaml.load(file_to_parse, Loader=yaml.FullLoader)
 
@@ -144,7 +169,7 @@ class Config(object):
         """
         Take a dictionary object and turn it into self
 
-        When we've finished self will be an object where the attributes are
+        When we've close self will be an object where the attributes are
 
         So if config_objec=dict(a=2, b=2)
         Then this object will become self.a=2, self.b=2
@@ -215,8 +240,12 @@ class Config(object):
         private_dict = self.private_config_dict
 
         ## order is - self (backtest filename), private, defaults
-        new_dict_with_private = fill_config_dict_with_defaults(self_as_dict, private_dict)
-        new_dict_with_defaults = fill_config_dict_with_defaults(new_dict_with_private, defaults_dict)
+        new_dict_with_private = fill_config_dict_with_defaults(
+            self_as_dict, private_dict
+        )
+        new_dict_with_defaults = fill_config_dict_with_defaults(
+            new_dict_with_private, defaults_dict
+        )
 
         self._create_config_from_dict(new_dict_with_defaults)
 
@@ -261,10 +290,16 @@ class Config(object):
 
 
 def default_config():
-    config = Config()
+    if os.getenv(PRIVATE_CONFIG_DIR_ENV_VAR):
+        config = Config(
+            private_filename=get_full_path_for_private_config(PRIVATE_CONFIG_FILE)
+        )
+    else:
+        config = Config()
     config.fill_with_defaults()
 
     return config
+
 
 if __name__ == "__main__":
     import doctest

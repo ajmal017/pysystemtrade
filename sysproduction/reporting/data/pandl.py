@@ -3,7 +3,8 @@ from collections import namedtuple
 
 import pandas as pd
 
-from syscore.objects import arg_not_supplied, missing_data, missing_contract
+from syscore.exceptions import missingContract, missingData
+from syscore.constants import arg_not_supplied
 from sysobjects.contracts import futuresContract
 from sysobjects.production.tradeable_object import instrumentStrategy
 
@@ -176,10 +177,11 @@ class pandlCalculateAndStore(object):
     ) -> float:
         print("Getting p&l for %s" % instrument_code)
 
-        pandl_across_contracts = self.pandl_for_instrument_across_contracts(
-            instrument_code
-        )
-        if pandl_across_contracts is missing_contract:
+        try:
+            pandl_across_contracts = self.pandl_for_instrument_across_contracts(
+                instrument_code
+            )
+        except missingContract:
             return 0.0
 
         pandl_series = pandl_across_contracts.sum(axis=1)
@@ -191,8 +193,9 @@ class pandlCalculateAndStore(object):
     ) -> pd.DataFrame:
         ## can return missing contract
         pandl_store = self.instrument_pandl_store
-        pandl_for_instrument = pandl_store.get(instrument_code, missing_data)
-        if pandl_for_instrument is missing_data:
+        try:
+            pandl_for_instrument = pandl_store[instrument_code]
+        except KeyError:
             pandl_for_instrument = self._get_pandl_for_instrument_across_contracts(
                 instrument_code
             )
@@ -202,20 +205,19 @@ class pandlCalculateAndStore(object):
 
     @property
     def instrument_pandl_store(self):
-        store = getattr(self, "_instrument_pandl_store", missing_data)
-        if store is missing_data:
-            store = self._instrument_pandl_store = {}
+        try:
+            store = getattr(self, "_instrument_pandl_store")
+        except AttributeError:
+            store = {}
+            setattr(self, "_instrument_pandl_store", store)
         return store
 
     def _get_pandl_for_instrument_across_contracts(
         self, instrument_code: str
     ) -> pd.DataFrame:
-        ## can return missing contract
         pandl_df_all_data = get_df_of_perc_pandl_series_for_instrument_all_strategies_across_contracts_in_date_range(
             self.data, instrument_code, self.start_date, self.end_date
         )
-        if pandl_df_all_data is missing_contract:
-            return missing_contract
 
         pandl_df = pandl_df_all_data[self.start_date : self.end_date]
 
@@ -223,11 +225,11 @@ class pandlCalculateAndStore(object):
 
     def get_period_perc_pandl_for_strategy_in_date_range(self, strategy_name: str):
         print("Getting p&l for %s" % strategy_name)
-        pandl_df = self.get_df_of_perc_pandl_series_for_strategy_all_instruments(
-            strategy_name
-        )
-
-        if pandl_df is missing_data:
+        try:
+            pandl_df = self.get_df_of_perc_pandl_series_for_strategy_all_instruments(
+                strategy_name
+            )
+        except missingData:
             return 0.0
 
         pandl_df = pandl_df[self.start_date : self.end_date]
@@ -246,9 +248,6 @@ class pandlCalculateAndStore(object):
             strategy_name
         )
 
-        if instrument_list is missing_data:
-            return missing_data
-
         pandl_df = pd.concat(pandl_list, axis=1)
         pandl_df.columns = instrument_list
 
@@ -261,7 +260,7 @@ class pandlCalculateAndStore(object):
             self.data, strategy_name
         )
         if len(instrument_list) == 0:
-            return missing_data, missing_data
+            raise missingData
 
         pandl_list = [
             self.perc_pandl_series_for_strategy_instrument_vs_total_capital(
@@ -278,8 +277,9 @@ class pandlCalculateAndStore(object):
         strategy_pandl_store = self.strategy_pandl_store
         store_key = instrument_strategy.key
 
-        pandl_series = strategy_pandl_store.get(store_key, missing_data)
-        if pandl_series is missing_data:
+        try:
+            pandl_series = strategy_pandl_store[store_key]
+        except KeyError:
             pandl_series = (
                 self._get_perc_pandl_series_for_strategy_instrument_vs_total_capital(
                     instrument_strategy
@@ -301,9 +301,11 @@ class pandlCalculateAndStore(object):
 
     @property
     def strategy_pandl_store(self):
-        store = getattr(self, "_strategy_pandl_store", missing_data)
-        if store is missing_data:
-            store = self._strategy_pandl_store = {}
+        try:
+            store = getattr(self, "_strategy_pandl_store")
+        except AttributeError:
+            store = {}
+            setattr(self, "_strategy_pandl_store", store)
         return store
 
 
@@ -316,9 +318,6 @@ def get_df_of_perc_pandl_series_for_instrument_all_strategies_across_contracts_i
     ) = get_list_of_perc_pandl_series_for_instrument_all_strategies_across_contracts_in_date_range(
         data, instrument_code, start_date, end_date
     )
-
-    if contract_list is missing_data:
-        return missing_contract
 
     pandl_df = pd.concat(pandl_list, axis=1)
     pandl_df.columns = contract_list
@@ -333,7 +332,7 @@ def get_list_of_perc_pandl_series_for_instrument_all_strategies_across_contracts
         data, instrument_code, start_date, end_date
     )
     if len(contract_list) == 0:
-        return missing_data, missing_data
+        raise missingContract
 
     pandl_list = [
         get_perc_pandl_series_for_contract(data, instrument_code, contract_id)
@@ -459,13 +458,14 @@ def get_position_series_for_instrument_strategy(data, instrument_code, strategy_
         strategy_name=strategy_name, instrument_code=instrument_code
     )
 
-    pos_series = diag_positions.get_position_df_for_instrument_strategy(
-        instrument_strategy
-    )
-    if pos_series is missing_data:
+    try:
+        pos_series = diag_positions.get_position_series_for_instrument_strategy(
+            instrument_strategy
+        )
+    except missingData:
         return pd.Series()
 
-    return pd.Series(pos_series.position)
+    return pos_series
 
 
 def get_fills_for_contract(data, instrument_code, contract_id):
@@ -493,11 +493,12 @@ def get_position_series_for_contract(data, instrument_code: str, contract_id: st
     diag_positions = diagPositions(data)
     contract = futuresContract(instrument_code, contract_id)
 
-    pos_series = diag_positions.get_position_df_for_contract(contract)
-    if pos_series is missing_data:
+    try:
+        pos_series = diag_positions.get_position_series_for_contract(contract)
+    except missingData:
         return pd.Series()
 
-    return pd.Series(pos_series.position)
+    return pos_series
 
 
 def get_list_of_strategies(data):

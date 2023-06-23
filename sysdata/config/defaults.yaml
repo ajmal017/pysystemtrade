@@ -62,6 +62,9 @@ intraday_frequency: H
 # Capital calculation
 production_capital_method: 'full'
 #
+stale_instruments: ['an_instrument_i_no_longer_trade_or_sample']
+#
+#
 #           BACKTESTING STUFF
 #
 # Raw data
@@ -176,9 +179,14 @@ forecast_weight_estimate:
 percentage_vol_target: 16.0
 notional_trading_capital: 1000000
 base_currency: "USD"
+# other options are full_compounding and half_compounding, but see syscore.capital.py
 capital_multiplier:
    func: syscore.capital.fixed_capital
 #
+# add instrument codes here to make long only at position sizing
+long_only_instruments:
+  - "an_instrument"
+  - "another_instrument"
 # Portfolio creation
 #
 instrument_div_multiplier: 1.0
@@ -243,12 +251,13 @@ instrument_weight_estimate:
      min_periods: 5
 #
 # buffering / position inertia
-buffer_method: position
+buffer_method: forecast
 buffer_size: 0.10
-buffer_trade_to_edge: False
+buffer_trade_to_edge: True
 # costs and accounting
 use_SR_costs: False
 vol_normalise_currency_costs: True
+multiply_roll_costs_by: 0.5
 #
 # risk overlay - make these numbers and uncomment
 #risk_overlay:

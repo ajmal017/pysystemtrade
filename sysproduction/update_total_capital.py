@@ -1,4 +1,4 @@
-from syscore.objects import success, failure
+from syscore.constants import success, failure
 
 from sysdata.data_blob import dataBlob
 from sysproduction.data.capital import dataCapital, dataMargin
@@ -43,9 +43,7 @@ class totalCapitalUpdate(object):
 
         log = data.log
 
-        margin_in_base_currency = (
-            broker_data.get_margin_used_in_base_currency()
-        )
+        margin_in_base_currency = broker_data.get_margin_used_in_base_currency()
         log.msg("Broker margin value is %f" % margin_in_base_currency)
 
         # Update total capital
@@ -75,14 +73,11 @@ class totalCapitalUpdate(object):
             )
         except Exception as e:
             # Problem, most likely spike OR
-            log.critical(
-                "Error %s whilst updating total capital; you may have to use update_capital_manual script or function OR IF YOU HAVEN'T DONE SO ALREADY YOU MUST RUN sysdata/production/TEMP_capital_transfer.py from the command line to transfer your old capital"
-                % e
-            )
+            log.critical("Error %s whilst updating total capital" % e)
             return failure
 
         log.msg("New capital is %f" % new_capital)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     update_total_capital()
